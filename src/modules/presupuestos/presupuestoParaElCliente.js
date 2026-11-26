@@ -153,7 +153,7 @@ export function fotoParaElCliente({ presupuesto = {}, capitulos = [], items = []
         elegida: vigentes[f.clave] != null ? vigentes[f.clave] : null,
         ofertas: matriz.empresas.filter(e => f.celdas[e.id]).map(e => {
           const x = f.celdas[e.id];
-          if (x.tipo === "paquete") return { id: e.id, cantidad: null, unitario: null, total: r2(x.parte * suyo), estimado: true };
+          // La que totalizó va en su propia fila, con su total: no se le inventa una parte por cada fila de las otras.
           // A centavos y por la cantidad, igual que el precio del rubro en el presupuesto.
           const unitario = conUtilidad ? r2(x.unitario * suyo) : x.unitario;
           return { id: e.id, cantidad: x.cantidad, unitario, total: conUtilidad ? r2(x.cantidad * unitario) : x.total, estimado: false };
@@ -164,7 +164,7 @@ export function fotoParaElCliente({ presupuesto = {}, capitulos = [], items = []
       // El total de cada oferta es la suma de lo que se ve de ella, fila por fila.
       empresas: matriz.empresas.filter(e => g.sub[e.id]).map(e => ({
         id: e.id, total: r2(filas.reduce((t, f) => t + n(f.ofertas.find(o => o.id === e.id)?.total), 0)),
-        faltan: g.sub[e.id].faltan, estimado: !!g.sub[e.id].estimado,
+        faltan: g.sub[e.id].faltan, estimado: false,
         elegidas: g.filas.filter(f => f.celdas[e.id] && String(vigentes[f.clave]) === String(e.id)).length,
       })),
       filas,

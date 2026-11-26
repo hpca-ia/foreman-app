@@ -126,7 +126,8 @@ function Capitulo({ c, empresas }) {
             <div key={e.id} className="oferta-del-capitulo" style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12.5, color: colors.inkSoft }}>
               <div style={{ flex: 1, overflowWrap: "anywhere" }}>
                 {nombreDe(e.id)}
-                {e.elegidas > 0 && <span style={elegidaEs}>✓ ELEGIDA{e.elegidas < cuadro.filas.length ? ` EN ${e.elegidas}` : ""}</span>}
+                {/* Elegida en todo lo que cotizó ahí, o en parte. Las filas de las otras —el total de la que totalizó— no cuentan. */}
+                {e.elegidas > 0 && <span style={elegidaEs}>✓ ELEGIDA{e.elegidas < cuadro.filas.filter(x => x.ofertas.some(o => o.id === e.id)).length ? ` EN ${e.elegidas}` : ""}</span>}
                 {e.faltan > 0 && <span style={{ ...chico, marginLeft: 6 }}>no cotizó {e.faltan === 1 ? "1 cosa" : `${e.faltan} cosas`}</span>}
               </div>
               <div style={{ whiteSpace: "nowrap", fontWeight: 600, color: colors.ink }}>{e.estimado ? "≈ " : ""}${plata(e.total)}</div>

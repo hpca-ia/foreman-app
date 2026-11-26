@@ -31,13 +31,26 @@
 //     una empresa con la V1 de la otra— o abren una fila nueva. Una columna
 //     por empresa: sigue siendo una matriz.
 //
-//   · UN RENGLÓN PUEDE CUBRIR VARIAS FILAS: la empresa que cotizó «toda la
-//     ventanería» en un solo número. Se compara por su total; su parte en
-//     cada fila es una estimación nuestra, repartida en proporción a lo que
-//     cotizaron las otras, y se marca.
+//   · LA QUE TOTALIZÓ SE COMPARA POR SU TOTAL, Y NADA MÁS. La empresa que
+//     cotizó «toda la ventanería» en un solo número no dijo cuánto vale cada
+//     ventana. La versión anterior repartía su suma entre las filas de la que
+//     sí itemizó, en proporción a los precios de esa otra, y mostraba el
+//     resultado al lado. Hernán, 26/11/2026, mirando esos números: «Está mal
+//     la comparación... ¿de dónde sacas los valores de cada renglón de Easy
+//     Home? No los puedes poner junto a los de Dekorando porque no están
+//     itemizados». «Window World totalizó, Easy Home totalizó y Dekorando sí
+//     lo itemizó... eventualmente se itemizan todas con sus versiones nuevas
+//     y se compara, pero ahorita la info que das está mal».
+//
+//     Un renglón que totaliza vive en su propia fila, con su total. No se
+//     reparte, no se pone contra las filas de nadie, y a su empresa no le
+//     «falta» ninguna fila: no se sabe, fila por fila, qué incluye. Cuando
+//     mande su versión itemizada, esos renglones se ubican en las filas de
+//     las otras y ahí sí se compara fila por fila.
 //
 //   · SE ELIGE por capítulo —todo lo que esa empresa cotizó ahí— o fila por
-//     fila. Un renglón que cubre varias filas se elige o se suelta entero.
+//     fila. Un total es por todo el capítulo: elegirlo suelta lo de las otras
+//     en ese capítulo, y elegir filas de otra lo suelta a él.
 //
 //   · LO ELEGIDO ALIMENTA EL CAPÍTULO: los renglones de la proforma elegida
 //     entran como rubros de ese capítulo, con sus palabras, su cantidad y su
@@ -49,7 +62,9 @@
 //     presupuesto, al pasar.
 //
 // NADIE GANA POR HABER COTIZADO MENOS COSAS. El menor de un capítulo se marca
-// solo entre las empresas que cubren todas sus filas.
+// solo entre las empresas que itemizaron todas sus filas; y las que
+// totalizaron entran a esa cuenta solo si las que itemizaron detallan lo
+// mismo entre sí: recién ahí hay un solo alcance contra el cual leer un total.
 //
 // Y PARA COMPARAR EN LAS MISMAS CONDICIONES, LO QUE UNA COTIZÓ DE MÁS SE SACA.
 // Hernán, 26/11/2026, con tres ofertas de ventanas y una que además traía
@@ -108,9 +123,30 @@ export const filaPropia = (cot, k) => `c${cot?.id}-${k}`;
 export const marcaDe = filas => (filas || []).map(String).join(",");
 
 /**
- * Los renglones de una cotización, listos para la matriz: cada uno con sus
- * filas, su capítulo y el descuento general ya restado. Una fila no se repite
- * dentro de la misma cotización: el segundo renglón que la nombre abre la suya.
+ * ¿ESTE RENGLÓN TOTALIZA? Es un solo valor por todo un trabajo, no un ítem.
+ *
+ *   · Lo que se dijo manda: `suma` true o false. Lo lee NOVA del papel, y se
+ *     corrige en la pantalla.
+ *   · Si no se dijo: totaliza el renglón que se ubicó como la suma de varias
+ *     filas de otra empresa, y el único renglón de un papel de un solo
+ *     renglón al que nadie puso en la fila de otro.
+ */
+export function totaliza(cot, r) {
+  if (r?.suma === true) return true;
+  if (r?.suma === false) return false;
+  const dichas = (Array.isArray(r?.filas) ? r.filas : []).map(texto).filter(Boolean);
+  return dichas.length >= 2 || (dichas.length === 0 && (cot?.renglones || []).length === 1);
+}
+
+/**
+ * Los renglones de una cotización, listos para la matriz: cada uno con SU
+ * fila, su capítulo, si totaliza (`esSuma`) y el descuento general ya restado.
+ *
+ * Un renglón, una fila. El ítem va a la fila de lo mismo que cotizó otra
+ * empresa, o abre la suya. El que totaliza tiene siempre la suya: conserva la
+ * que traía de su versión anterior, y nunca la de otra empresa. Una fila no se
+ * repite dentro de la misma cotización: el segundo renglón que la nombre abre
+ * la suya.
  *
  * El capítulo es el que dice el renglón. Si no dice —o es una cotización
  * cargada antes de este cambio, que traía rubros del presupuesto—, se usa el
@@ -124,32 +160,22 @@ export function renglonesDe(cot, capituloDeItem = null) {
   const usadas = new Set();
   const dichos = (cot?.renglones || []).map((r, k) => {
     const dichas = (Array.isArray(r?.filas) ? r.filas : []).map(texto).filter(Boolean);
+    const esSuma = totaliza(cot, r);
+    // La que totaliza: su fila de antes si traía UNA (la de su versión anterior), o la propia. Nunca varias.
+    const pedida = esSuma ? (dichas.length === 1 ? dichas[0] : filaPropia(cot, k)) : (dichas[0] || filaPropia(cot, k));
     // El renglón que se sacó de la comparación no ocupa ninguna fila.
-    let filas = r?.fuera ? [] : (dichas.length ? dichas : [filaPropia(cot, k)]).filter(f => !usadas.has(f) && usadas.add(f));
+    let filas = r?.fuera ? [] : [pedida].filter(f => !usadas.has(f) && usadas.add(f));
     if (!filas.length && !r?.fuera) { filas = [filaPropia(cot, k)]; usadas.add(filas[0]); }
     const deAntes = capituloDeItem ? (Array.isArray(r?.items) ? r.items : []).map(id => capituloDeItem(id)).find(Boolean) : null;
     const capitulo = texto(r?.capitulo) || texto(deAntes);
-    return queda === 1 ? { ...r, k, filas, capitulo, fuera: !!r?.fuera }
-      : { ...r, k, filas, capitulo, fuera: !!r?.fuera, precio_unitario: r6(unitarioDe(r) * queda), total: r2(totalDelRenglon(r) * queda) };
+    return queda === 1 ? { ...r, k, filas, capitulo, fuera: !!r?.fuera, esSuma }
+      : { ...r, k, filas, capitulo, fuera: !!r?.fuera, esSuma, precio_unitario: r6(unitarioDe(r) * queda), total: r2(totalDelRenglon(r) * queda) };
   });
   // El capítulo de la mayoría del papel, para los renglones que no dicen cuál.
   const cuenta = new Map();
   dichos.forEach(r => { if (r.capitulo) cuenta.set(r.capitulo, (cuenta.get(r.capitulo) || 0) + 1); });
   const delPapel = texto(cot?.capitulo) || [...cuenta.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || SIN_CAPITULO;
   return dichos.map(r => (r.capitulo ? r : { ...r, capitulo: delPapel }));
-}
-
-/** Reparte `total` según `pesos`, en centavos y sin que sobre ni falte ninguno. */
-export function repartir(total, pesos = []) {
-  const centavos = Math.round(n(total) * 100);
-  const suma = pesos.reduce((t, p) => t + Math.max(0, n(p)), 0);
-  const partes = pesos.map(p => (suma > 0 ? centavos * Math.max(0, n(p)) / suma : centavos / (pesos.length || 1)));
-  const enteros = partes.map(Math.floor);
-  let resto = centavos - enteros.reduce((t, x) => t + x, 0);
-  // Los centavos que quedan, a los que más les faltaba para el siguiente.
-  const orden = partes.map((p, i) => [p - enteros[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
-  for (let j = 0; resto > 0 && orden.length; j = (j + 1) % orden.length, resto--) enteros[orden[j][1]] += 1;
-  return enteros.map(c => c / 100);
 }
 
 /**
@@ -160,12 +186,13 @@ export function repartir(total, pesos = []) {
  *                      precio_unitario, total, capitulo, filas: [clave…] }] }]
  * @returns {
  *   empresas: [{ id, proveedor, version, reemplaza_a, cotizado, comparado, cubre, capitulos, sinCapitulo, renglones }],
- *   grupos:   [{ numero, capitulo, filas: [{ clave, descripcion, unidad, cantidad, celdas, referencia, menor }],
- *                sub: { [cotId]: { total, cubre, faltan, estimado } }, menor, referencia: { total, rubros } }],
+ *   grupos:   [{ numero, capitulo, filas: [{ clave, descripcion, unidad, cantidad, celdas, referencia, menor, suma }],
+ *                sub: { [cotId]: { total, cubre, faltan, totaliza } }, menor, fuera, referencia: { total, rubros } }],
  *   celdaDe:  (clave, cotId) => celda | null,
  * }
- * Una celda es { tipo: "rubro", renglon, descripcion, unidad, cantidad, unitario, total, otraCantidad } o
- * { tipo: "paquete", renglon, descripcion, totalDelPaquete, filas, parte, total, pesoDe }.
+ * Una celda es { tipo, renglon, descripcion, unidad, cantidad, unitario, total, otraCantidad }, con
+ * `tipo` "rubro" —un ítem, que se compara con lo de las otras en esa fila— o "suma" —un total: está
+ * solo en su fila—. La fila con `suma` es la de un total: no es una fila del itemizado.
  */
 export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones = [] } = {}) {
   const itemPorId = new Map((items || []).map(i => [String(i.id), i]));
@@ -197,43 +224,23 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
     if (!filas.has(clave)) filas.set(clave, { clave, capitulo: r.capitulo, descripcion: texto(r.descripcion), unidad: texto(r.unidad), cantidad: n(r.cantidad) || 1, celdas: {} });
     return filas.get(clave);
   };
-  const ponerRubro = (c, r, clave) => {
+  const poner = (c, r, clave) => {
     const fila = abrir(clave, r);
     const cantidad = n(r.cantidad) || 1;
     const celda = {
-      tipo: "rubro", renglon: r.k, descripcion: texto(r.descripcion), unidad: texto(r.unidad), cantidad,
+      tipo: r.esSuma ? "suma" : "rubro", renglon: r.k, descripcion: texto(r.descripcion), unidad: texto(r.unidad), cantidad,
       unitario: unitarioDe(r), total: totalDelRenglon(r), otraCantidad: !igual(cantidad, fila.cantidad),
     };
     celdas.set(de(clave, c.id), celda); fila.celdas[c.id] = celda;
     return [clave];
   };
-
-  // 1. Un renglón, una fila.
-  for (const c of empresas) for (const r of c.renglones) { r.vivas = []; if (r.filas.length === 1) r.vivas = ponerRubro(c, r, r.filas[0]); }
-  // 2. Un renglón que cubre varias: las que siguen existiendo. Si no quedó
-  //    ninguna —se quitó la cotización que las había puesto—, abre la suya.
-  for (const c of empresas) {
-    for (const r of c.renglones) {
-      if (r.filas.length < 2) continue;
-      const vivas = r.filas.filter(f => filas.has(f) && !filas.get(f).celdas[c.id]);
-      if (vivas.length < 2) { r.vivas = ponerRubro(c, r, vivas[0] || filaPropia(c, r.k)); continue; }
-      const deOtras = vivas.map(f => {
-        const vistas = Object.entries(filas.get(f).celdas).filter(([id, x]) => String(id) !== String(c.id) && x.tipo === "rubro" && x.total > 0).map(([, x]) => x.total);
-        return vistas.length ? vistas.reduce((t, x) => t + x, 0) / vistas.length : 0;
-      });
-      const [pesos, pesoDe] = deOtras.every(v => v > 0) ? [deOtras, "otras"] : [vivas.map(() => 1), "iguales"];
-      const totalDelPaquete = totalDelRenglon(r);
-      const partes = repartir(totalDelPaquete, pesos);
-      vivas.forEach((f, j) => {
-        const celda = { tipo: "paquete", renglon: r.k, descripcion: texto(r.descripcion), totalDelPaquete, filas: vivas, parte: partes[j], total: partes[j], pesoDe };
-        celdas.set(de(f, c.id), celda); filas.get(f).celdas[c.id] = celda;
-      });
-      r.vivas = vivas;
-    }
-  }
+  // Un renglón, una fila. El que se sacó de la comparación no tiene ninguna.
+  for (const c of empresas) for (const r of c.renglones) r.vivas = r.filas.length ? poner(c, r, r.filas[0]) : [];
   const celdaDe = (clave, cotId) => celdas.get(de(clave, cotId)) || null;
   // El capítulo de un renglón es el de su fila: una fila vive en un solo capítulo.
   for (const c of empresas) for (const r of c.renglones) if (r.vivas.length) r.capitulo = filas.get(r.vivas[0])?.capitulo ?? r.capitulo;
+  // LA FILA DE UN TOTAL: ninguna empresa puso ahí un ítem. No es una fila del itemizado.
+  const esDeTotal = f => !Object.values(f.celdas).some(x => x.tipo === "rubro");
   // LO QUE SE SACÓ DE LA COMPARACIÓN, por capítulo: a la vista, para volver a ponerlo.
   const sacados = empresas.flatMap(c => c.renglones.filter(r => r.fuera).map(r => ({
     cotId: c.id, proveedor: c.proveedor || "", renglon: r.k, capitulo: r.capitulo, descripcion: texto(r.descripcion), unidad: texto(r.unidad),
@@ -266,19 +273,26 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
       const conPrecio = Object.entries(f.celdas).filter(([, x]) => x.tipo === "rubro" && x.total > 0);
       const minimo = conPrecio.length > 1 ? Math.min(...conPrecio.map(([, x]) => x.total)) : null;
       const menores = minimo == null ? [] : conPrecio.filter(([, x]) => igual(x.total, minimo)).map(([id]) => id);
-      return { ...f, referencia: referenciaDe(f.clave), menor: menores.length === 1 ? menores[0] : null };
+      return { ...f, suma: esDeTotal(f), referencia: referenciaDe(f.clave), menor: menores.length === 1 ? menores[0] : null };
     });
+    const itemizadas = suyas.filter(f => !f.suma);
     const sub = {};
     for (const c of empresas) {
       const propias = suyas.filter(f => f.celdas[c.id]);
       if (!propias.length) continue;
+      const totalizo = propias.some(f => f.celdas[c.id].tipo === "suma");
       sub[c.id] = {
-        total: r2(propias.reduce((t, f) => t + f.celdas[c.id].total, 0)), cubre: propias.length, faltan: suyas.length - propias.length,
-        // Estimado: parte de un renglón que también cubre filas de otro capítulo.
-        estimado: propias.some(f => f.celdas[c.id].tipo === "paquete" && f.celdas[c.id].filas.some(x => !suyas.some(s => s.clave === x))),
+        total: r2(propias.reduce((t, f) => t + f.celdas[c.id].total, 0)), cubre: propias.length, totaliza: totalizo,
+        // A la que totalizó no le «falta» ninguna fila: no se sabe, fila por fila, qué incluye su total.
+        // A la que itemizó le faltan las que otra detalló y ella no.
+        faltan: totalizo ? 0 : itemizadas.filter(f => !f.celdas[c.id]).length,
       };
     }
-    const completas = Object.entries(sub).filter(([, s]) => s.faltan === 0 && s.total > 0);
+    // EL MENOR. Entre las que itemizaron todo. Las que totalizaron entran solo si las que itemizaron
+    // detallan lo mismo entre sí: si a una le falta algo que otra sí cotizó, no hay un alcance contra
+    // el cual leer un total, y marcarlo como el menor sería afirmar lo que no se sabe.
+    const mismoAlcance = Object.values(sub).every(s => s.totaliza || s.faltan === 0);
+    const completas = Object.entries(sub).filter(([, s]) => s.total > 0 && s.faltan === 0 && (!s.totaliza || mismoAlcance));
     const minimo = completas.length > 1 ? Math.min(...completas.map(([, s]) => s.total)) : null;
     const menores = minimo == null ? [] : completas.filter(([, s]) => igual(s.total, minimo)).map(([id]) => id);
     const enElPre = numeroDe.get(nombre);
@@ -308,42 +322,34 @@ export function matrizDeCotizaciones({ capitulos = [], items = [], cotizaciones 
 
 // ── ELEGIR ─────────────────────────────────────────────────────────────────
 //
-// Lo elegido es un mapa { fila → cotización }. Un renglón que cubre varias
-// filas se elige o se suelta entero: la empresa cotizó todo junto, y quedarse
-// con una parte es adjudicarle un precio que no dio.
-
-/** Las filas que arrastra elegir esta celda: ella sola, o todas las de su renglón. */
-const conSuRenglon = (matriz, clave, cotId) => {
-  const celda = matriz.celdaDe(clave, cotId);
-  return !celda ? [] : celda.tipo === "paquete" ? celda.filas.map(String) : [String(clave)];
-};
-
-/** Saca de lo elegido los renglones que quedaron partidos al cambiar de dueño algunas de sus filas. */
-function sinRenglonesRotos(matriz, elegidos) {
-  const out = { ...elegidos };
-  for (const [clave, cotId] of Object.entries(elegidos)) {
-    const celda = matriz.celdaDe(clave, cotId);
-    if (celda?.tipo === "paquete" && celda.filas.some(f => String(out[f]) !== String(cotId))) {
-      celda.filas.forEach(f => { if (String(out[f]) === String(cotId)) delete out[f]; });
-    }
-  }
-  return out;
-}
+// Lo elegido es un mapa { fila → cotización }.
 
 /**
  * Elegir —o soltar, si ya estaba— una fila para una empresa, o todo lo que
  * cotizó en un capítulo. @param que  { fila } o { capitulo }
+ *
+ * UN TOTAL ES POR TODO EL CAPÍTULO. Elegir el total de una empresa suelta lo
+ * que hubiera elegido de las otras en ese capítulo; y elegir filas de una
+ * empresa suelta el total de otra. Si no, al presupuesto entrarían las 28
+ * ventanas de una y, encima, la ventanería completa de la otra.
  */
 export function elegir(matriz, elegidos = {}, cotId, que = {}) {
-  const claves = que.capitulo != null
-    ? (matriz.grupos.find(g => g.capitulo === que.capitulo)?.filas || []).filter(f => f.celdas[cotId]).flatMap(f => conSuRenglon(matriz, f.clave, cotId))
-    : conSuRenglon(matriz, que.fila, cotId);
-  const unicas = [...new Set(claves)];
-  if (!unicas.length) return elegidos;
-  const yaEstaban = unicas.every(f => String(elegidos[f]) === String(cotId));
+  const grupo = que.capitulo != null ? matriz.grupos.find(g => g.capitulo === que.capitulo)
+    : matriz.grupos.find(g => g.filas.some(f => f.clave === String(que.fila)));
+  const claves = que.capitulo != null ? (grupo?.filas || []).filter(f => f.celdas[cotId]).map(f => f.clave)
+    : (matriz.celdaDe(que.fila, cotId) ? [String(que.fila)] : []);
+  if (!claves.length) return elegidos;
+  const yaEstaban = claves.every(f => String(elegidos[f]) === String(cotId));
   const out = { ...elegidos };
-  unicas.forEach(f => { if (yaEstaban) delete out[f]; else out[f] = cotId; });
-  return sinRenglonesRotos(matriz, out);
+  claves.forEach(f => { if (yaEstaban) delete out[f]; else out[f] = cotId; });
+  if (yaEstaban) return out;
+  const eligeUnTotal = claves.some(f => matriz.celdaDe(f, cotId)?.tipo === "suma");
+  for (const f of grupo?.filas || []) {
+    const deQuien = out[f.clave];
+    if (deQuien == null || String(deQuien) === String(cotId)) continue;
+    if (eligeUnTotal || matriz.celdaDe(f.clave, deQuien)?.tipo === "suma") delete out[f.clave];
+  }
+  return out;
 }
 
 /**
@@ -422,7 +428,7 @@ export function planDeAplicar({ matriz, elegidos = {}, items = [], enlaces = {} 
         precio_base, precio_unitario, total: r2(cantidad * precio_unitario), costo: r2(cantidad * precio_base),
         costoAntes: item ? r2(n(item.cantidad) * (n(item.precio_base) > 0 ? n(item.precio_base) : n(item.precio_unitario))) : null,
         proveedorAntes: item ? texto(item.cotizacion_proveedor) || null : null,
-        proveedor: e.proveedor, cotizacion_id: e.id, repartido: r.vivas.length > 1, yaEsta,
+        proveedor: e.proveedor, cotizacion_id: e.id, suma: !!r.esSuma, yaEsta,
         // De qué papel salió, como lo pide la migración 138, y de qué fila (197).
         comparativa_fila: emparejado ? `=${marca}` : marca, cotizacion_archivo_id: e.archivo_id ?? null, cotizacion_proveedor: e.proveedor || null,
         cotizacion_renglon: texto(r.descripcion).slice(0, 400), cotizacion_cantidad: n(r.cantidad) || 1,
@@ -463,22 +469,14 @@ export function elegidosDe(cotizaciones = []) {
 
 /**
  * Los renglones que hay que marcar `fuera` para sacar una fila de la
- * comparación: el de cada empresa que la cotizó con su propio precio.
- *
- * Si alguna la cotizó DENTRO DE UNA SUMA, la fila no se puede sacar: esa
- * empresa no dijo cuánto de su suma es por eso, y descontárselo a las otras
- * dejaría la comparación peor que antes. Se devuelve por qué.
+ * comparación: el de cada empresa que cotizó eso. La fila de un total es de
+ * una sola empresa: sale su total entero.
  *
  * @returns { renglones: [{ cotId, renglon }] } o { porQue }
  */
 export function paraSacarLaFila(matriz, clave) {
   const fila = (matriz?.grupos || []).flatMap(g => g.filas).find(f => f.clave === String(clave));
   if (!fila) return { porQue: "Esa fila ya no está." };
-  const enSuma = Object.entries(fila.celdas).filter(([, x]) => x.tipo === "paquete");
-  if (enSuma.length) {
-    const quien = matriz.empresas.find(e => String(e.id) === String(enSuma[0][0]))?.proveedor || "Una empresa";
-    return { porQue: `${quien} lo cotizó dentro de una sola suma: no se sabe cuánto de esa suma es por esto.` };
-  }
   return { renglones: Object.entries(fila.celdas).map(([cotId, x]) => ({ cotId: matriz.empresas.find(e => String(e.id) === String(cotId))?.id ?? cotId, renglon: x.renglon })) };
 }
 
@@ -488,12 +486,13 @@ export function paraSacarLaFila(matriz, clave) {
 export const alCapitulo = (renglones = [], capitulo = "") => (renglones || []).map(r => ({ ...r, capitulo: texto(capitulo) }));
 
 /**
- * Las filas que ya hay en la comparación, para decirle a NOVA dónde ubicar
- * los renglones de una cotización nueva.
+ * Las filas que ya ITEMIZÓ alguna empresa, para decirle a NOVA dónde ubicar
+ * los renglones de una cotización nueva. La fila de un total no va: contra un
+ * total no hay nada que ubicar.
  * @returns [{ n, clave, capitulo, descripcion, unidad, cantidad }]
  */
 export function filasParaUbicar(matriz) {
-  return (matriz?.grupos || []).flatMap(g => g.filas.map(f => ({ clave: f.clave, capitulo: g.capitulo, descripcion: f.descripcion, unidad: f.unidad, cantidad: f.cantidad })))
+  return (matriz?.grupos || []).flatMap(g => g.filas.filter(f => !f.suma).map(f => ({ clave: f.clave, capitulo: g.capitulo, descripcion: f.descripcion, unidad: f.unidad, cantidad: f.cantidad })))
     .map((f, i) => ({ n: i + 1, ...f }));
 }
 
@@ -548,16 +547,17 @@ export function heredarFilas(nuevos = [], anteriores = []) {
   const heredados = (nuevos || []).map(r => {
     const previo = deAntes.get(mismoTexto(r.descripcion));
     // Lo que se había sacado de la comparación sigue afuera: es la misma decisión sobre el mismo renglón.
-    return previo ? { ...r, capitulo: texto(previo.capitulo), filas: tomar(previo.vivas?.length ? previo.vivas : previo.filas), ...(previo.fuera ? { fuera: true } : {}) } : null;
+    // Y el que totalizaba y se llama igual sigue siendo su total —en la misma fila—; el que era un ítem, un ítem.
+    return previo ? { ...r, capitulo: texto(previo.capitulo), filas: tomar(previo.vivas?.length ? previo.vivas : previo.filas),
+      ...(previo.esSuma != null ? { suma: !!previo.esSuma } : {}), ...(previo.fuera ? { fuera: true } : {}) } : null;
   });
   return (nuevos || []).map((r, i) => heredados[i] || { ...r, filas: tomar(r.filas) });
 }
 
 /**
  * Lo que la versión anterior tenía adjudicado y la nueva sigue cotizando: eso
- * sigue elegido, para no tener que elegir de nuevo. Un renglón de varias filas
- * solo si siguen todas. Lo que mientras tanto se le dio a otra empresa es de
- * la otra: pasa al volver a una versión anterior.
+ * sigue elegido, para no tener que elegir de nuevo. Lo que mientras tanto se
+ * le dio a otra empresa es de la otra: pasa al volver a una versión anterior.
  *
  * @param otras  las demás cotizaciones del presupuesto
  * @param nueva  la versión que queda vigente: { id, renglones, totales }
@@ -570,7 +570,14 @@ export function elegidosAlActualizar({ capitulos = [], items = [], otras = [], n
   const deOtra = new Set(vigentes.flatMap(c => (Array.isArray(c.elegidos) ? c.elegidos : []).map(String)));
   const siguen = {};
   (elegidosAntes || []).map(String).forEach(f => { if (!deOtra.has(f) && matriz.celdaDe(f, ID)) siguen[f] = ID; });
-  return Object.keys(sinRenglonesRotos(matriz, siguen));
+  // UN TOTAL ES POR TODO EL CAPÍTULO: no vuelve encima de lo que mientras tanto se eligió de otra
+  // empresa ahí, ni vuelven filas sueltas encima del total elegido de otra.
+  const deLasOtras = elegidosDe(vigentes);
+  return Object.keys(siguen).filter(clave => {
+    const grupo = matriz.grupos.find(g => g.filas.some(x => x.clave === clave));
+    const ajenas = (grupo?.filas || []).map(x => matriz.celdaDe(x.clave, deLasOtras[x.clave])).filter(Boolean);
+    return !ajenas.length || (matriz.celdaDe(clave, ID).tipo !== "suma" && !ajenas.some(x => x.tipo === "suma"));
+  });
 }
 
 /**
@@ -580,12 +587,17 @@ export function elegidosAlActualizar({ capitulos = [], items = [], otras = [], n
  *
  * @param matriz    la de hoy
  * @param anterior  la matriz armada con anterioresDe()
+ * La que había totalizado y ahora manda el detalle: su total «ahora viene
+ * itemizado» (`itemizo`), y cada fila nueva es algo que «ahora cotiza». No se
+ * compara el precio de una ventana contra un pedazo inventado del total viejo.
+ *
  * @returns { filas: [{ clave, capitulo, descripcion, antes, ahora, que, cantidadAntes?, cantidadAhora? }], antes, ahora, diferencia }
  */
 export function cambiosDeVersion({ matriz, anterior, cotId, anteriorId } = {}) {
   const filas = [];
   const vistas = new Set();
-  const valor = x => (x ? (x.tipo === "rubro" ? x.unitario : x.parte) : null);
+  const valor = x => (x ? x.unitario : null);
+  const itemizaEn = capitulo => (matriz?.grupos || []).find(g => g.capitulo === capitulo)?.filas.some(f => f.celdas[cotId]?.tipo === "rubro");
   const cotizada = x => (x?.tipo === "rubro" ? n(x.cantidad) : null);
   const mirar = (f, capitulo) => {
     if (vistas.has(f.clave)) return;
@@ -595,7 +607,7 @@ export function cambiosDeVersion({ matriz, anterior, cotId, anteriorId } = {}) {
     const va = valor(ahora), vb = valor(antes), ca = cotizada(ahora), cb = cotizada(antes);
     const otraCantidad = ca != null && cb != null && !igual(ca, cb);
     const precio = !antes ? "nuevo" : !ahora ? "ya_no" : igual(va, vb) ? "igual" : va > vb ? "subio" : "bajo";
-    const que = precio === "igual" && otraCantidad ? "cantidad" : precio;
+    const que = precio === "igual" && otraCantidad ? "cantidad" : precio === "ya_no" && antes.tipo === "suma" && itemizaEn(capitulo) ? "itemizo" : precio;
     if (que !== "igual") {
       filas.push({ clave: f.clave, capitulo, descripcion: (ahora || antes).descripcion || f.descripcion, antes: vb, ahora: va, que,
         ...(otraCantidad ? { cantidadAntes: cb, cantidadAhora: ca } : {}) });

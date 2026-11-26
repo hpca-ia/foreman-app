@@ -124,15 +124,25 @@ test("sin la comparativa, el cliente ve solo el presupuesto con lo elegido: ni e
   assert.equal(f.capitulos[1].rubros[1].total, 1266);
 });
 
-test("la empresa que mandó una sola suma: su renglón entra entero al presupuesto, y en el itemizado su parte va marcada como estimada", () => {
-  const WINDOW = { id: 2, proveedor: "Window World", renglones: [linea("Sistema corredizo europeo minimal", 1, 2300, { unidad: "glb", filas: ["c1-0", "c1-1"] })] };
-  const f = fotoParaElCliente({ presupuesto: PRESUPUESTO, capitulos: CAPITULOS, items: ITEMS, cotizaciones: [DEKORANDO, WINDOW], elegidos: { "c1-0": 2, "c1-1": 2 }, modo: "costo" });
+test("LA QUE TOTALIZÓ: su renglón entra entero al presupuesto, y el cliente la ve con su total en su propia fila, sin un valor inventado por cada fila de la otra", () => {
+  const WINDOW = { id: 2, proveedor: "Window World", renglones: [linea("Sistema corredizo europeo minimal", 1, 2300, { unidad: "glb" })] };
+  const f = fotoParaElCliente({ presupuesto: PRESUPUESTO, capitulos: CAPITULOS, items: ITEMS, cotizaciones: [DEKORANDO, WINDOW], elegidos: { "c2-0": 2 }, modo: "costo" });
   const vidrio = f.capitulos[1];
   assert.deepEqual(vidrio.rubros.map(r => [r.descripcion, r.cantidad, r.total, r.deQuien]), [["Pasamanos de escalera", 10, 1200, null], ["Sistema corredizo europeo minimal", 1, 2300, "Window World"]]);
-  assert.deepEqual(vidrio.comparativa.empresas, [{ id: 1, total: 2195, faltan: 0, estimado: false, elegidas: 0 }, { id: 2, total: 2300, faltan: 0, estimado: false, elegidas: 2 }]);
-  // 2.300 repartido en proporción a 929 y 1.266.
-  assert.deepEqual(vidrio.comparativa.filas[0].ofertas[1], { id: 2, cantidad: null, unitario: null, total: 973.44, estimado: true });
-  assert.equal(vidrio.comparativa.filas[0].ofertas[1].total + vidrio.comparativa.filas[1].ofertas[1].total, 2300);
+  assert.deepEqual(vidrio.comparativa.empresas, [{ id: 1, total: 2195, faltan: 0, estimado: false, elegidas: 0 }, { id: 2, total: 2300, faltan: 0, estimado: false, elegidas: 1 }]);
+  // Las filas que itemizó Dekorando traen solo lo de Dekorando; el total de Window World va en su fila.
+  assert.deepEqual(vidrio.comparativa.filas.map(x => [x.descripcion.slice(0, 12), x.elegida, x.ofertas]), [
+    ["V1 Dormitori", null, [{ id: 1, cantidad: 1, unitario: 929, total: 929, estimado: false }]],
+    ["V3 Máquinas ", null, [{ id: 1, cantidad: 1, unitario: 1266, total: 1266, estimado: false }]],
+    ["Sistema corr", 2, [{ id: 2, cantidad: 1, unitario: 2300, total: 2300, estimado: false }]],
+  ]);
+  // Nada estimado viaja: ni como se guardaba antes, «cubriendo» las filas de la otra.
+  const deAntes = { ...WINDOW, renglones: [{ ...WINDOW.renglones[0], filas: ["c1-0", "c1-1"] }] };
+  for (const w of [WINDOW, deAntes]) {
+    const foto = fotoParaElCliente({ presupuesto: PRESUPUESTO, capitulos: CAPITULOS, items: ITEMS, cotizaciones: [DEKORANDO, w], elegidos: {}, modo: "costo" });
+    assert.equal(JSON.stringify(foto).includes('"estimado":true'), false);
+    assert.deepEqual(foto.capitulos[1].comparativa.filas.map(x => x.ofertas.map(o => [o.id, o.total])), [[[1, 929]], [[1, 1266]], [[2, 2300]]]);
+  }
 });
 
 test("SI CAMBIA LO ELEGIDO O UNA COTIZACIÓN, YA NO ES LO QUE VE EL CLIENTE: hay que compartir de nuevo", () => {

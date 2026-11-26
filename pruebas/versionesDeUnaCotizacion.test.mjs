@@ -23,7 +23,7 @@ const DEKORANDO = { id: 1, proveedor: "Dekorando", archivo_id: 71, version: 1, r
   linea("V9 Family room - Mampara 3 cuerpos", "u", 1, 2761), linea("V16 Sala - Mampara 6 cuerpos", "u", 2, 3283),
 ] };
 const SUS_FILAS = ["c1-0", "c1-1", "c1-2", "c1-3"];
-// La que mandó una sola suma, puesta a cubrir lo que detalló Dekorando.
+// La que totalizó: un solo renglón por todo. (Guardada como antes, «cubriendo» las filas de Dekorando: vive igual en su propia fila.)
 const WINDOW = { id: 2, proveedor: "Window World", archivo_id: 72, version: 1, reemplaza_a: null, reemplazada_at: null,
   renglones: [linea("Sistema corredizo europeo minimal", "glb", 1, 11900, { filas: SUS_FILAS })] };
 const reemplazada = c => ({ ...c, reemplazada_at: "2026-11-27T15:00:00.000Z" });
@@ -44,11 +44,14 @@ test("LO QUE YA SE UBICÓ NO SE VUELVE A UBICAR: el renglón que se llama igual 
     [[VIDRIO, ["c1-0"], 900], [VIDRIO, ["c1-1"], 1300], [VIDRIO, ["c1-3"], 3283], [VIDRIO, [], 250]]);
   // Sin versión anterior, queda lo que propuso NOVA.
   assert.deepEqual(heredarFilas(LEIDA, []).map(r => [r.capitulo, r.filas]), [["", []], ["", []], ["", []], [VIDRIO, []]]);
-  // «SE IRÁN EMPAREJANDO»: la que había mandado una suma manda ahora el detalle, y NOVA lo ubica en las filas de la otra.
+  // «SE IRÁN EMPAREJANDO»: la que había totalizado manda ahora el detalle, y NOVA lo ubica en las filas de la otra.
   const detallada = heredarFilas([linea("Ventana V1", "u", 1, 950, { filas: ["c1-0"] }), linea("Mampara V3", "u", 1, 1290, { filas: ["c1-1"] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW]));
   assert.deepEqual(detallada.map(r => r.filas), [["c1-0"], ["c1-1"]]);
-  // Y la suma que se llama igual sigue cubriendo las mismas filas.
-  assert.deepEqual(heredarFilas([linea("Sistema corredizo europeo minimal", "glb", 1, 11500, { filas: [] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW]))[0].filas, SUS_FILAS);
+  // Y el total que se llama igual sigue siendo su total, en su misma fila.
+  const elMismoTotal = heredarFilas([linea("Sistema corredizo europeo minimal", "glb", 1, 11500, { filas: [] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW]))[0];
+  assert.deepEqual([elMismoTotal.filas, elMismoTotal.suma], [["c2-0"], true]);
+  // El que era un ítem sigue siendo un ítem.
+  assert.deepEqual(D2.renglones.map(r => r.suma), [false, false, false, undefined]);
 });
 
 test("LO QUE PIDIÓ: la versión nueva reemplaza a la anterior en su misma columna, y la anterior queda guardada", () => {
@@ -90,10 +93,12 @@ test("NO HAY QUE ELEGIR DE NUEVO: lo que tenía adjudicado y sigue cotizando sig
   const base = { capitulos: CAPITULOS, items: ITEMS };
   // Dekorando tenía las cuatro. En la versión nueva ya no cotiza la V9.
   assert.deepEqual(elegidosAlActualizar({ ...base, otras: [WINDOW], nueva: { renglones: D2.renglones }, elegidosAntes: SUS_FILAS }), ["c1-0", "c1-1", "c1-3"]);
-  // Window World tenía su suma elegida —las cuatro filas—. Con Dekorando en la versión 2 la V9 ya no existe: la suma sigue, sobre las tres que quedan.
-  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [D2], nueva: WINDOW, elegidosAntes: SUS_FILAS }), ["c1-0", "c1-1", "c1-3"]);
-  // Y si una de sus filas ya es de otra empresa, la suma no vuelve partida: no vuelve.
-  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [{ ...DEKORANDO, elegidos: ["c1-0"] }], nueva: WINDOW, elegidosAntes: SUS_FILAS }), []);
+  // Window World tenía su total elegido. Que Dekorando mande otra versión no le cambia nada: sigue elegido.
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [D2], nueva: WINDOW, elegidosAntes: ["c2-0"] }), ["c2-0"]);
+  // UN TOTAL ES POR TODO EL CAPÍTULO: si mientras tanto se eligió algo de otra empresa ahí, el total no vuelve encima...
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [{ ...DEKORANDO, elegidos: ["c1-0"] }], nueva: WINDOW, elegidosAntes: ["c2-0"] }), []);
+  // ...ni vuelven las filas de una encima del total elegido de la otra.
+  assert.deepEqual(elegidosAlActualizar({ ...base, otras: [{ ...WINDOW, elegidos: ["c2-0"] }], nueva: DEKORANDO, elegidosAntes: SUS_FILAS }), []);
 });
 
 test("VOLVER A LA VERSIÓN ANTERIOR: vuelve con lo que tenía elegido, menos lo que mientras tanto se le dio a otra empresa", () => {
@@ -169,8 +174,26 @@ test("lo que se había sacado de la comparación sigue afuera en la versión nue
   const nuevos = heredarFilas([
     linea("Ventanería completa", "glb", 1, 9900, { capitulo: "", filas: [] }), linea("CABINAS DE BAÑO", "glb", 1, 3100, { capitulo: "", filas: [] }), linea("Lucernario", "glb", 1, 900, { filas: [] }),
   ], comoLaVe(EASY, [DEKORANDO, EASY]));
-  assert.deepEqual(nuevos.map(r => [r.descripcion, r.filas, !!r.fuera]), [["Ventanería completa", SUS_FILAS, false], ["CABINAS DE BAÑO", [], true], ["Lucernario", [], false]]);
-  // En la matriz: la suma rebajada se compara, las cabinas siguen afuera, y lo nuevo entra en su propia fila.
+  assert.deepEqual(nuevos.map(r => [r.descripcion, r.filas, !!r.fuera, r.suma]), [["Ventanería completa", ["c9-0"], false, true], ["CABINAS DE BAÑO", [], true, false], ["Lucernario", [], false, undefined]]);
+  // En la matriz: el total rebajado se compara en su misma fila, las cabinas siguen afuera, y lo nuevo entra en su propia fila.
   const m = armar([DEKORANDO, reemplazada(EASY), { ...EASY, id: 10, version: 2, reemplaza_a: 9, renglones: nuevos }]);
-  assert.deepEqual([m.grupos[0].sub[10].total, m.grupos[0].fuera.map(x => x.descripcion), m.grupos[0].filas.length], [10800, ["CABINAS DE BAÑO"], 5]);
+  assert.deepEqual([m.grupos[0].sub[10].total, m.grupos[0].fuera.map(x => x.descripcion), m.grupos[0].filas.length], [10800, ["CABINAS DE BAÑO"], 6]);
+  assert.deepEqual(m.grupos[0].filas.slice(4).map(x => [x.clave, x.suma, x.celdas[10].total]), [["c9-0", true, 9900], ["c10-2", false, 900]]);
+});
+
+test("LA QUE HABÍA TOTALIZADO MANDA EL DETALLE: su total «ahora viene itemizado», y no se compara cada ventana contra un pedazo inventado del total viejo", () => {
+  const W2 = { id: 7, proveedor: "Window World", version: 2, reemplaza_a: 2, reemplazada_at: null, renglones: heredarFilas(
+    [linea("Ventana 1", "u", 1, 900, { filas: ["c1-0"] }), linea("Mampara 3", "u", 1, 1300, { filas: ["c1-1"] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW])) };
+  const todas = [DEKORANDO, reemplazada(WINDOW), W2];
+  const cambio = cambiosDeVersion({ matriz: armar(todas), anterior: armar(anterioresDe(todas)), cotId: 7, anteriorId: 2 });
+  assert.deepEqual(cambio.filas, [
+    { clave: "c1-0", capitulo: VIDRIO, descripcion: "Ventana 1", antes: null, ahora: 900, que: "nuevo" },
+    { clave: "c1-1", capitulo: VIDRIO, descripcion: "Mampara 3", antes: null, ahora: 1300, que: "nuevo" },
+    { clave: "c2-0", capitulo: VIDRIO, descripcion: "Sistema corredizo europeo minimal", antes: 11900, ahora: null, que: "itemizo" },
+  ]);
+  assert.deepEqual([cambio.antes, cambio.ahora], [11900, 2200]);
+  // El mismo total, rebajado, en su misma fila: bajó.
+  const W3 = { ...W2, renglones: heredarFilas([linea("Sistema corredizo europeo minimal", "glb", 1, 11000, { filas: [] })], comoLaVe(WINDOW, [DEKORANDO, WINDOW])) };
+  const rebaja = cambiosDeVersion({ matriz: armar([DEKORANDO, reemplazada(WINDOW), W3]), anterior: armar(anterioresDe([DEKORANDO, reemplazada(WINDOW), W3])), cotId: 7, anteriorId: 2 });
+  assert.deepEqual(rebaja.filas, [{ clave: "c2-0", capitulo: VIDRIO, descripcion: "Sistema corredizo europeo minimal", antes: 11900, ahora: 11000, que: "bajo" }]);
 });

@@ -10,11 +10,19 @@
 // el capítulo». «Con las actualizaciones se irán emparejando los rubros».
 // «Eventualmente se mueve la oferta itemizada al presupuesto... o se empareja
 // con los rubros».
+//
+// Y con la matriz publicada, mirando los valores que se le ponían a cada fila
+// de la que había mandado un solo número: «Está mal la comparación... ¿de
+// dónde sacas los valores de cada renglón de Easy Home? No los puedes poner
+// junto a los de Dekorando porque no están itemizados». «Window World
+// totalizó, Easy Home totalizó y Dekorando sí lo itemizó... eventualmente se
+// itemizan todas con sus versiones nuevas y se compara, pero ahorita la info
+// que das está mal».
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  matrizDeCotizaciones, repartir, elegir, planDeAplicar, elegidosPorCotizacion, elegidosDe, totalDelRenglon, renglonesDe,
+  matrizDeCotizaciones, totaliza, elegir, planDeAplicar, elegidosPorCotizacion, elegidosDe, totalDelRenglon, renglonesDe,
   filasParaUbicar, alCapitulo, marcaDelRubro, paraSacarLaFila, SIN_CAPITULO,
 } from "../src/modules/presupuestos/matrizDeCotizaciones.js";
 
@@ -37,9 +45,10 @@ const DEKORANDO = { id: 1, proveedor: "Dekorando", archivo_id: 71, renglones: [
   linea("V9 Family room - Mampara 3 cuerpos", "u", 1, 2761, { capitulo: VIDRIO }),
   linea("V16 Sala - Mampara 6 cuerpos", "u", 1, 6566, { capitulo: VIDRIO }),
 ] };
-// Window World: «envió solo una sumatoria».
+// Window World: «envió solo una sumatoria». Totalizó.
 const WINDOW = { id: 2, proveedor: "Window World", archivo_id: 72, renglones: [linea("Sistema corredizo europeo minimal", "glb", 1, 11900, { capitulo: VIDRIO })] };
 const LAS_DE_DEKORANDO = ["c1-0", "c1-1", "c1-2", "c1-3"];
+// La misma, como se guardaba antes de este cambio: «ubicada» como la suma de las cuatro filas de la otra.
 const WINDOW_UBICADA = { ...WINDOW, renglones: [{ ...WINDOW.renglones[0], filas: LAS_DE_DEKORANDO }] };
 // Aluvid: itemizada y ya emparejada con las filas de Dekorando; no cotiza la V9 y trae algo más.
 const ALUVID = { id: 3, proveedor: "Aluvid", archivo_id: 73, renglones: [
@@ -68,11 +77,11 @@ test("EL ERROR GRANDE: la cotización itemizada muestra TODO lo que cotizó, aun
   assert.deepEqual(m.grupos.map(g => [g.numero, g.capitulo]), [["2", VIDRIO]]);
   const g = m.grupos[0];
   // ARRIBA, EL TOTAL DE CADA OFERTA en ese capítulo. Dekorando: sus cuatro renglones, 929 + 1.266 + 2.761 + 6.566.
-  assert.deepEqual(g.sub[1], { total: 11522, cubre: 4, faltan: 1, estimado: false });
-  assert.deepEqual(g.sub[2], { total: 11900, cubre: 1, faltan: 4, estimado: false });
+  assert.deepEqual(g.sub[1], { total: 11522, cubre: 4, totaliza: false, faltan: 0 });
+  assert.deepEqual(g.sub[2], { total: 11900, cubre: 1, totaliza: true, faltan: 0 });
   assert.deepEqual(m.empresas.map(e => [e.proveedor, e.cotizado, e.comparado, e.capitulos, e.sinCapitulo]),
     [["Dekorando", 11522, 11522, [VIDRIO], 0], ["Window World", 11900, 11900, [VIDRIO], 0]]);
-  // LAS FILAS SON LO QUE SE COTIZÓ, no los rubros del presupuesto: las cuatro ventanas, y la suma de la otra.
+  // LAS FILAS SON LO QUE SE COTIZÓ, no los rubros del presupuesto: las cuatro ventanas, y el total de la otra en su fila.
   assert.deepEqual(g.filas.map(f => [f.clave, f.descripcion, f.cantidad, Object.keys(f.celdas)]), [
     ["c1-0", "V1 Dormitorio de servicio - Ventana abatible", 1, ["1"]], ["c1-1", "V3 Máquinas - Mampara 2 cuerpos", 1, ["1"]],
     ["c1-2", "V9 Family room - Mampara 3 cuerpos", 1, ["1"]], ["c1-3", "V16 Sala - Mampara 6 cuerpos", 1, ["1"]],
@@ -81,27 +90,40 @@ test("EL ERROR GRANDE: la cotización itemizada muestra TODO lo que cotizó, aun
   assert.deepEqual(g.filas[0].celdas[1], { tipo: "rubro", renglon: 0, descripcion: "V1 Dormitorio de servicio - Ventana abatible", unidad: "u", cantidad: 1, unitario: 929, total: 929, otraCantidad: false });
   // Lo que el capítulo tiene hoy en el presupuesto va al lado: dos rubros, sin cantidades todavía.
   assert.deepEqual(g.referencia, { total: 0, rubros: 2 });
-  // NADIE GANA POR HABER COTIZADO MENOS COSAS: sin emparejar, ninguna cubre todas las filas, y no se marca un menor.
-  assert.equal(g.menor, null);
+  // LA OTRA TOTALIZÓ: no le «faltan» las ventanas, ni a Dekorando le «falta» el total de ella. Se comparan por el total.
+  assert.equal(g.menor, "1");
 });
 
-test("«ENVIÓ SOLO UNA SUMATORIA»: la suma cubre lo que la otra detalló, se comparan por el total, y su parte en cada fila se marca como estimada", () => {
-  const m = armar([DEKORANDO, WINDOW_UBICADA]);
-  const g = m.grupos[0];
-  assert.equal(g.filas.length, 4);
-  assert.deepEqual([g.sub[1], g.sub[2]], [{ total: 11522, cubre: 4, faltan: 0, estimado: false }, { total: 11900, cubre: 4, faltan: 0, estimado: false }]);
-  // Ahora sí se comparan sobre lo mismo: el menor del capítulo es Dekorando.
-  assert.equal(g.menor, "1");
-  // Su parte en cada fila sale en proporción a lo que detalló la otra, y cierra al centavo.
-  const partes = g.filas.map(f => f.celdas[2].parte);
-  assert.deepEqual(partes, [959.48, 1307.53, 2851.58, 6781.41]);
-  assert.equal(Math.round(partes.reduce((t, x) => t + x, 0) * 100) / 100, 11900);
-  assert.deepEqual([g.filas[0].celdas[2].tipo, g.filas[0].celdas[2].totalDelPaquete, g.filas[0].celdas[2].filas, g.filas[0].celdas[2].pesoDe], ["paquete", 11900, LAS_DE_DEKORANDO, "otras"]);
-  // En una fila, el menor se marca solo entre los que dieron un precio propio: la parte de una suma es una estimación.
-  assert.deepEqual(g.filas.map(f => f.menor), [null, null, null, null]);
-  // Si la cotización que había puesto esas filas se quita, la suma vuelve a su propia fila en vez de quedar colgada.
-  const sola = armar([WINDOW_UBICADA]);
-  assert.deepEqual(sola.grupos[0].filas.map(f => [f.clave, f.celdas[2].tipo, f.celdas[2].total]), [["c2-0", "rubro", 11900]]);
+test("«WINDOW WORLD TOTALIZÓ... DEKORANDO SÍ LO ITEMIZÓ»: la que totalizó se compara por su total, en su propia fila, y no se le inventa un valor por cada fila de la otra", () => {
+  // Da igual cómo esté guardada: sola en su papel, «ubicada» como la suma de las filas de la otra —así se guardaba—, o dicho por NOVA.
+  for (const window of [WINDOW, WINDOW_UBICADA, { ...WINDOW, renglones: [{ ...WINDOW.renglones[0], suma: true }] }]) {
+    const m = armar([DEKORANDO, window]);
+    const g = m.grupos[0];
+    // Las cuatro filas que itemizó Dekorando, y el total de Window World en la suya, aparte.
+    assert.deepEqual(g.filas.map(f => [f.clave, f.suma, Object.keys(f.celdas)]),
+      [["c1-0", false, ["1"]], ["c1-1", false, ["1"]], ["c1-2", false, ["1"]], ["c1-3", false, ["1"]], ["c2-0", true, ["2"]]]);
+    assert.deepEqual(g.filas[4].celdas[2], { tipo: "suma", renglon: 0, descripcion: "Sistema corredizo europeo minimal", unidad: "glb", cantidad: 1, unitario: 11900, total: 11900, otraCantidad: false });
+    // «¿DE DÓNDE SACAS LOS VALORES DE CADA RENGLÓN?»: en ninguna fila de Dekorando hay un número de Window World, ni entero ni estimado.
+    assert.equal(g.filas.slice(0, 4).some(f => f.celdas[2]), false);
+    assert.equal(g.filas.some(f => Object.values(f.celdas).some(x => "parte" in x || x.tipo === "paquete")), false);
+    // A ninguna «le falta» nada, se comparan por el total, y el menor es Dekorando.
+    assert.deepEqual([g.sub[1], g.sub[2]], [{ total: 11522, cubre: 4, totaliza: false, faltan: 0 }, { total: 11900, cubre: 1, totaliza: true, faltan: 0 }]);
+    assert.equal(g.menor, "1");
+    // Fila por fila no hay menor: en cada una cotizó una sola.
+    assert.deepEqual(g.filas.map(f => f.menor), [null, null, null, null, null]);
+    // A NOVA no se le manda la fila de un total: contra un total no hay nada que ubicar.
+    assert.deepEqual(filasParaUbicar(m).map(f => f.clave), LAS_DE_DEKORANDO);
+  }
+  // QUÉ TOTALIZA. Lo que se dijo manda; si no, el renglón que cubría varias filas y el único de un papel de un solo renglón.
+  const papel = n => ({ renglones: Array.from({ length: n }, () => ({})) });
+  assert.deepEqual([totaliza(papel(1), {}), totaliza(papel(3), { filas: ["a", "b"] }), totaliza(papel(3), { suma: true }), totaliza(papel(3), { suma: true, filas: ["a"] })], [true, true, true, true]);
+  // No totaliza: un ítem de un papel de varios, el que se dijo que es un ítem, y el único renglón de un papel que alguien puso en la fila de lo mismo de otra.
+  assert.deepEqual([totaliza(papel(3), {}), totaliza(papel(1), { suma: false }), totaliza(papel(3), { suma: false, filas: ["a", "b"] }), totaliza(papel(1), { filas: ["a"] })], [false, false, false, false]);
+  // CUANDO MANDA EL DETALLE —«eventualmente se itemizan todas con sus versiones nuevas y se compara»—, cae en las filas de la otra y ahí sí hay menor por fila.
+  const itemizada = { ...WINDOW, renglones: [linea("Ventana 1", "u", 1, 900, { capitulo: VIDRIO, filas: ["c1-0"] }), linea("Mampara 3", "u", 1, 1300, { capitulo: VIDRIO, filas: ["c1-1"] })] };
+  const h = armar([DEKORANDO, itemizada]).grupos[0];
+  assert.deepEqual(h.filas.map(f => [f.clave, f.suma, f.celdas[2]?.total ?? null, f.menor]), [["c1-0", false, 900, "2"], ["c1-1", false, 1300, "1"], ["c1-2", false, null, null], ["c1-3", false, null, null]]);
+  assert.deepEqual(h.sub[2], { total: 2200, cubre: 2, totaliza: false, faltan: 2 });
 });
 
 test("«SE IRÁN EMPAREJANDO LOS RUBROS»: la V1 de una con la V1 de la otra, y lo que solo cotizó una queda en su fila", () => {
@@ -114,7 +136,7 @@ test("«SE IRÁN EMPAREJANDO LOS RUBROS»: la V1 de una con la V1 de la otra, y 
   assert.equal(g.filas[0].descripcion, "V1 Dormitorio de servicio - Ventana abatible");
   assert.equal(g.filas[0].celdas[3].descripcion, "Ventana V1");
   // A cada una le falta una fila que la otra sí cotizó: se dice, y no hay menor del capítulo.
-  assert.deepEqual([g.sub[1], g.sub[3]], [{ total: 11522, cubre: 4, faltan: 1, estimado: false }, { total: 8970, cubre: 4, faltan: 1, estimado: false }]);
+  assert.deepEqual([g.sub[1], g.sub[3]], [{ total: 11522, cubre: 4, totaliza: false, faltan: 1 }, { total: 8970, cubre: 4, totaliza: false, faltan: 1 }]);
   assert.equal(g.menor, null);
   // Si cotiza otra cantidad que la de la fila, se avisa.
   const otra = { ...ALUVID, renglones: [linea("Ventana V1", "u", 2, 880, { capitulo: VIDRIO, filas: ["c1-0"] })] };
@@ -160,7 +182,7 @@ test("a NOVA se le dice qué filas ya cotizaron las otras, para que ubique la co
   assert.deepEqual(filasParaUbicar(armar([])), []);
 });
 
-test("SE ELIGE POR CAPÍTULO —«una de ellas iría al presupuesto»— o fila por fila; y una suma se elige o se suelta entera", () => {
+test("SE ELIGE POR CAPÍTULO —«una de ellas iría al presupuesto»— o fila por fila; y un total es por todo el capítulo", () => {
   const m = armar([DEKORANDO, ALUVID]);
   // Tocar el total de Dekorando en el capítulo: todas sus filas.
   let e = elegir(m, {}, 1, { capitulo: VIDRIO });
@@ -174,12 +196,16 @@ test("SE ELIGE POR CAPÍTULO —«una de ellas iría al presupuesto»— o fila 
   // Volver a tocar lo que ya está, lo suelta.
   assert.equal("c1-1" in elegir(m, e, 1, { fila: "c1-1" }), false);
   assert.deepEqual(elegir(m, elegir(m, {}, 3, { capitulo: VIDRIO }), 3, { capitulo: VIDRIO }), {});
-  // LA SUMA, ENTERA: tocar cualquiera de sus partes la elige toda...
-  const conSuma = armar([DEKORANDO, WINDOW_UBICADA]);
-  const todo = elegir(conSuma, {}, 2, { fila: "c1-2" });
-  assert.deepEqual(todo, { "c1-0": 2, "c1-1": 2, "c1-2": 2, "c1-3": 2 });
-  // ...y darle una de sus filas a otra empresa la suelta entera: no se le adjudica una parte que no cotizó por separado.
-  assert.deepEqual(elegir(conSuma, todo, 1, { fila: "c1-0" }), { "c1-0": 1 });
+  // UN TOTAL ES POR TODO EL CAPÍTULO: elegirlo suelta lo que se había elegido de la otra...
+  const conTotal = armar([DEKORANDO, WINDOW]);
+  const deDekorando = elegir(conTotal, {}, 1, { capitulo: VIDRIO });
+  assert.deepEqual(deDekorando, { "c1-0": 1, "c1-1": 1, "c1-2": 1, "c1-3": 1 });
+  assert.deepEqual(elegir(conTotal, deDekorando, 2, { capitulo: VIDRIO }), { "c2-0": 2 });
+  assert.deepEqual(elegir(conTotal, deDekorando, 2, { fila: "c2-0" }), { "c2-0": 2 });
+  // ...y elegir una fila de la otra lo suelta a él: al presupuesto no entran las ventanas de una y, encima, la ventanería completa de la otra.
+  assert.deepEqual(elegir(conTotal, { "c2-0": 2 }, 1, { fila: "c1-0" }), { "c1-0": 1 });
+  // Las filas de quien itemizó no son de la que totalizó: no hay nada suyo que elegir ahí.
+  assert.deepEqual(elegir(conTotal, deDekorando, 2, { fila: "c1-2" }), deDekorando);
   // Una empresa que no cotizó ahí no cambia nada.
   assert.deepEqual(elegir(m, { "c1-0": 1 }, 3, { fila: "c1-2" }), { "c1-0": 1 });
 });
@@ -206,15 +232,17 @@ test("«LOS RUBROS DE LA PROFORMA ALIMENTARÍAN EL CAPÍTULO»: cada renglón el
   assert.deepEqual(m2.grupos[0].filas[0].referencia, { unitario: 929, total: 929, deQuien: "Dekorando", paquete: false });
   assert.deepEqual(m2.grupos[0].referencia, { total: 11522, rubros: 6 });
 
-  // SE VUELVE A ESCOGER: ahora Window World, que mandó una suma. Entra SU renglón —uno solo—, y los cuatro de Dekorando se quitan.
+  // SE VUELVE A ESCOGER: ahora Window World, que totalizó. Entra SU renglón —uno solo, marcado con su fila—, y los cuatro de Dekorando se quitan.
   const elB = elegir(m2, elegir(m2, {}, 1, { capitulo: VIDRIO }), 2, { capitulo: VIDRIO });
   const planB = planDeAplicar({ matriz: m2, elegidos: elB, items: pasado });
-  assert.deepEqual(planB.entran.map(x => [x.descripcion, x.cantidad, x.precio_base, x.costo, x.repartido, x.comparativa_fila]),
-    [["Sistema corredizo europeo minimal", 1, 11900, 11900, true, "c1-0,c1-1,c1-2,c1-3"]]);
+  assert.deepEqual(elB, { "c2-0": 2 });
+  assert.deepEqual(planB.entran.map(x => [x.descripcion, x.cantidad, x.precio_base, x.costo, x.suma, x.comparativa_fila]),
+    [["Sistema corredizo europeo minimal", 1, 11900, 11900, true, "c2-0"]]);
   assert.deepEqual(planB.quitan.map(q => [q.descripcion.slice(0, 3), q.proveedor, q.total]), [["V1 ", "Dekorando", 929], ["V3 ", "Dekorando", 1266], ["V9 ", "Dekorando", 2761], ["V16", "Dekorando", 6566]]);
   const pasadoB = conLoPasado(pasado, planB);
   assert.deepEqual(pasadoB.filter(i => i.capitulo === VIDRIO).map(i => i.descripcion.slice(0, 12)), ["Ventana vidr", "Pasamanos de", "Sistema corr"]);
-  assert.deepEqual(armar([DEKORANDO, WINDOW_UBICADA], pasadoB).grupos[0].filas[0].referencia, { unitario: null, total: null, deQuien: "Window World", paquete: true });
+  // En el presupuesto queda en la fila de su total; las de Dekorando ya no tienen nada.
+  assert.deepEqual(armar([DEKORANDO, WINDOW_UBICADA], pasadoB).grupos[0].filas.map(f => f.referencia), [null, null, null, null, { unitario: 11900, total: 11900, deQuien: "Window World", paquete: false }]);
   // Y si no queda nadie elegido, lo que había salido de la comparativa se quita; lo demás, no.
   const nadie = planDeAplicar({ matriz: m2, elegidos: {}, items: pasado });
   assert.deepEqual([nadie.rubros.length, nadie.quitan.length, nadie.porPasar], [0, 4, 4]);
@@ -279,16 +307,13 @@ test("lo elegido se guarda en cada cotización, por fila, y se vuelve a leer igu
   assert.deepEqual(elegidosDe([{ id: 1, elegidos: ["c1-0"], reemplazada_at: "2026-11-27T10:00:00Z" }, { id: 8, elegidos: ["c1-1"] }]), { "c1-1": 8 });
 });
 
-test("el descuento general que ofrece el papel ya va restado, y el reparto no pierde ni inventa centavos", () => {
+test("el descuento general que ofrece el papel ya va restado, salvo que se diga que no", () => {
   const conDescuento = { ...DEKORANDO, totales: { subtotal: 11522, descuento_pct: 10 } };
   const m = armar([conDescuento]);
   assert.deepEqual([m.empresas[0].descuento, m.empresas[0].descuentoOfrecido, m.grupos[0].sub[1].total, m.grupos[0].filas[0].celdas[1].unitario], [10, 10, 10369.8, 836.1]);
   // Y se puede no restar: hay descuentos que el proveedor ofrece y después no sostiene.
   const sin = armar([{ ...conDescuento, totales: { ...conDescuento.totales, sin_descuento: true } }]);
   assert.deepEqual([sin.empresas[0].descuento, sin.empresas[0].descuentoOfrecido, sin.grupos[0].sub[1].total], [0, 10, 11522]);
-  assert.deepEqual(repartir(100, [1, 1, 1]), [33.34, 33.33, 33.33]);
-  assert.deepEqual(repartir(0.05, [1, 1, 1]), [0.02, 0.02, 0.01]);
-  assert.equal(repartir(11900, [929, 1266, 2761, 6566]).reduce((t, x) => t + Math.round(x * 100), 0), 1190000);
   assert.equal(totalDelRenglon({ cantidad: 3, precio_unitario: 10.5 }), 31.5);
   assert.equal(totalDelRenglon({ cantidad: 3, precio_unitario: 10.5, total: 30 }), 30);
 });
@@ -306,7 +331,7 @@ test("la migración 197 solo agrega la marca del rubro: no cambia ninguno", () =
 // que además cotizó cabinas de baño y claraboyas—: «en ese caso me gustaría
 // tener la opción de borrar rubros para comparar mismas condiciones».
 
-// Como llegó de verdad: una suma por toda la ventanería, y dos cosas que nadie más cotizó.
+// Como llegó de verdad: un total por toda la ventanería, y dos cosas que nadie más cotizó.
 const EASYHOME = { id: 9, proveedor: "EASYHOME", archivo_id: 79, renglones: [
   linea("Ventanería: puertas y ventanas con sistema perfil cámara europea", "glb", 1, 10400, { capitulo: VIDRIO, filas: LAS_DE_DEKORANDO }),
   linea("Cabinas de baño", "glb", 1, 3310, { capitulo: VIDRIO }),
@@ -315,15 +340,18 @@ const EASYHOME = { id: 9, proveedor: "EASYHOME", archivo_id: 79, renglones: [
 const sinLoDeMas = { ...EASYHOME, renglones: EASYHOME.renglones.map((r, k) => (k > 0 ? { ...r, fuera: true } : r)) };
 
 test("«BORRAR RUBROS PARA COMPARAR MISMAS CONDICIONES»: lo que una cotizó de más se saca, y las tres se comparan sobre lo mismo", () => {
-  // TAL COMO LLEGA: EASYHOME suma más porque cotizó más cosas, a las otras «les faltan» dos filas, y no hay menor.
+  // TAL COMO LLEGA: EASYHOME suma más porque cotizó más cosas. A Dekorando, que itemizó, «le faltan» esas dos; y mientras
+  // lo itemizado no sea lo mismo para todas no hay un alcance contra el cual leer un total: no se marca ningún menor.
   const antes = armar([DEKORANDO, WINDOW_UBICADA, EASYHOME]);
   const g = antes.grupos[0];
-  assert.deepEqual([g.filas.length, g.sub[1], g.sub[2], g.sub[9], g.menor], [6,
-    { total: 11522, cubre: 4, faltan: 2, estimado: false }, { total: 11900, cubre: 4, faltan: 2, estimado: false }, { total: 16970, cubre: 6, faltan: 0, estimado: false }, null]);
-  // SE SACAN LAS CABINAS Y LAS CLARABOYAS. Ahora son las mismas cuatro filas para las tres, y el menor es EASYHOME.
+  assert.deepEqual(g.filas.map(f => [f.clave, f.suma]), [["c1-0", false], ["c1-1", false], ["c1-2", false], ["c1-3", false], ["c2-0", true], ["c9-0", true], ["c9-1", false], ["c9-2", false]]);
+  assert.deepEqual([g.sub[1], g.sub[2], g.sub[9], g.menor], [
+    { total: 11522, cubre: 4, totaliza: false, faltan: 2 }, { total: 11900, cubre: 1, totaliza: true, faltan: 0 }, { total: 16970, cubre: 3, totaliza: true, faltan: 0 }, null]);
+  // SE SACAN LAS CABINAS Y LAS CLARABOYAS. Ahora es el mismo trabajo para las tres, y el menor es EASYHOME.
   const m = armar([DEKORANDO, WINDOW_UBICADA, sinLoDeMas]);
   const h = m.grupos[0];
-  assert.deepEqual([h.filas.length, h.sub[1].total, h.sub[2].total, h.sub[9], h.menor], [4, 11522, 11900, { total: 10400, cubre: 4, faltan: 0, estimado: false }, "9"]);
+  assert.deepEqual([h.filas.length, h.sub[1], h.sub[2].total, h.sub[9], h.menor], [6,
+    { total: 11522, cubre: 4, totaliza: false, faltan: 0 }, 11900, { total: 10400, cubre: 1, totaliza: true, faltan: 0 }, "9"]);
   // NO SE BORRA: su papel sigue sumando lo mismo, y lo que se sacó queda a la vista, con cuánto era.
   const e = m.empresas.find(x => x.id === 9);
   assert.deepEqual([e.cotizado, e.comparado, e.fuera, e.renglones.length], [16970, 10400, { cuantos: 2, total: 6570 }, 3]);
@@ -344,16 +372,16 @@ test("«BORRAR RUBROS PARA COMPARAR MISMAS CONDICIONES»: lo que una cotizó de 
   assert.deepEqual(armar([todoFuera]).grupos.map(x => [x.capitulo, x.filas.length, x.fuera.length]), [["CARPINTERIA", 0, 1]]);
 });
 
-test("qué hay que marcar para sacar una fila: el renglón de cada empresa que la cotizó; y si una la cotizó dentro de una suma, no se puede", () => {
+test("qué hay que marcar para sacar una fila: el renglón de cada empresa que la cotizó; y la fila de un total saca ese total", () => {
   const m = armar([DEKORANDO, ALUVID, EASYHOME]);
   // Los mosquiteros, que solo cotizó Aluvid: su renglón 3.
   assert.deepEqual(paraSacarLaFila(m, "c3-3"), { renglones: [{ cotId: 3, renglon: 3 }] });
   // Las cabinas de EASYHOME.
   assert.deepEqual(paraSacarLaFila(m, "c9-1"), { renglones: [{ cotId: 9, renglon: 1 }] });
-  // La V1 la detallaron dos, pero EASYHOME la tiene adentro de su suma: sacársela a las otras dejaría la comparación peor.
-  assert.deepEqual(paraSacarLaFila(m, "c1-0"), { porQue: "EASYHOME lo cotizó dentro de una sola suma: no se sabe cuánto de esa suma es por esto." });
-  // Sin la suma en el medio, una fila que cotizaron dos se saca para las dos.
-  assert.deepEqual(paraSacarLaFila(armar([DEKORANDO, ALUVID]), "c1-0"), { renglones: [{ cotId: 1, renglon: 0 }, { cotId: 3, renglon: 0 }] });
+  // La V1 la itemizaron dos: se saca para las dos. EASYHOME totalizó: no tiene nada en esa fila.
+  assert.deepEqual(paraSacarLaFila(m, "c1-0"), { renglones: [{ cotId: 1, renglon: 0 }, { cotId: 3, renglon: 0 }] });
+  // El total de EASYHOME, entero.
+  assert.deepEqual(paraSacarLaFila(m, "c9-0"), { renglones: [{ cotId: 9, renglon: 0 }] });
   assert.deepEqual(paraSacarLaFila(m, "no-existe"), { porQue: "Esa fila ya no está." });
 });
 
@@ -385,4 +413,12 @@ test("LA PANTALLA: cada capítulo tiene su matriz, con las empresas de ESE capí
   // Y en la cabeza de la empresa, cuánto es toda su cotización cuando lo que se compara es menos.
   assert.match(jsx, /className="fuera-de-la-oferta"[\s\S]{0,200}toda su cotización \$\{plata\(e\.cotizado\)\}/);
   assert.match(jsx, /className=\{r\.fuera \? "poner-renglon" : "sacar-renglon"\}/);
+  // LA QUE TOTALIZÓ: su total va en su fila, primero; en las filas de quien itemizó dice «totalizó», sin ningún número; y nada se estima.
+  assert.match(pantalla, /\{\[\.\.\.totales, \.\.\.itemizadas\]\.map\(f => \(\s+<tr key=\{f\.clave\} className=\{f\.suma \? "fila-de-total" : "fila-cotizada"\}/);
+  assert.match(pantalla, /g\.sub\[e\.id\]\.totaliza \? "totalizó" : "no cotizó"/);
+  assert.doesNotMatch(jsx, /≈|\.parte\b|totalDelPaquete|estimado/);
+  assert.match(jsx, /className="como-cotizo"[^\n]*\{s\.totaliza \? "totalizó" : "itemizó"\}/);
+  // Y se corrige en los renglones de la empresa: totalizó, o es un ítem.
+  assert.match(jsx, /className="es-un-total"[\s\S]{0,260}enRenglon\(enRevision, r\.k, \{ suma: true, filas: \[\] \}\)/);
+  assert.match(jsx, /className="es-un-item"[\s\S]{0,260}enRenglon\(enRevision, r\.k, \{ suma: false, filas: \[\] \}\)/);
 });

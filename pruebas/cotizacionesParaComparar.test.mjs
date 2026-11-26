@@ -35,8 +35,11 @@ test("a NOVA se le pide el capítulo de cada renglón, en qué fila de las otras
   // Las filas son lo que cotizaron OTRAS EMPRESAS, no los rubros del presupuesto.
   assert.match(pedido, /OTRAS EMPRESAS YA COTIZARON las FILAS de abajo/);
   assert.match(pedido, /FILAS:\n1 \| HERRERÍA, ALUMINIO, VIDRIO \| V1 Dormitorio de servicio - Ventana abatible \| u \| 1/);
-  // Una sola suma contra lo que la otra detalló: todas las filas.
-  assert.match(pedido, /Si el rubro es una SUMA GLOBAL de varias FILAS .* pon todas: \[1,2,3\]/);
+  // SI TOTALIZA —«Window World totalizó, Easy Home totalizó y Dekorando sí lo itemizó»—, lo dice, y no lo ubica en ninguna fila.
+  assert.match(PEDIDO_DE_LECTURA, /"filas":\[\],"suma":false\}/);
+  assert.match(PEDIDO_DE_LECTURA, /"suma" es true si ese renglon es UN SOLO VALOR GLOBAL por todo un trabajo, sin detallar sus piezas/);
+  assert.match(pedido, /Si el rubro es una SUMA GLOBAL .* NO lo ubiques: "suma": true y "filas": \[\]/);
+  assert.doesNotMatch(pedido, /pon todas/);
   assert.match(pedido, /Si dudas, \[\]: no fuerces/);
   // Las condiciones, copiadas del papel.
   assert.match(PEDIDO_DE_LECTURA, /"condiciones":""/);
@@ -55,21 +58,24 @@ test("la respuesta se entiende aunque venga envuelta en texto o en un bloque de 
   assert.equal(jsonDeLaRespuesta(""), null);
 });
 
-test("lo leído queda con el capítulo de cada renglón y la fila en la que cae: una, varias o la suya", () => {
+test("lo leído queda con el capítulo de cada renglón y la fila en la que cae —una, o la suya—, o con que totaliza", () => {
   const leido = { proveedor: " Aluvid S.A. ", subtotal: 4490, iva: 673.5, total: 5163.5, condiciones: " Validez 15 días. 60 % de anticipo. No incluye obra civil. ", rubros: [
     { descripcion: "Ventana V1", unidad: "u", cantidad: 1, precio_unitario: 880, total: 880, capitulo: 3, filas: [1] },
     { descripcion: "Mamparas V3 y V9", unidad: "glb", cantidad: 1, precio_unitario: null, total: 3310, capitulo: 3, filas: [2, 3] },
-    { descripcion: "Mosquiteros", unidad: "glb", cantidad: 1, precio_unitario: 300, total: null, capitulo: 3, filas: [] },
+    { descripcion: "Mosquiteros", unidad: "glb", cantidad: 1, precio_unitario: 300, total: null, capitulo: 3, filas: [], suma: false },
+    { descripcion: "Ventanería completa instalada", unidad: "glb", cantidad: 1, precio_unitario: 9000, total: 9000, capitulo: 3, filas: [1], suma: true },
     { descripcion: "  ", cantidad: 1, precio_unitario: 5 },
   ] };
   const c = cotizacionDeLaLectura(leido, { capitulos: CAPITULOS, filas: FILAS });
   assert.equal(c.proveedor, "Aluvid S.A.");
   assert.deepEqual(c.renglones, [
     { descripcion: "Ventana V1", unidad: "u", cantidad: 1, precio_unitario: 880, total: 880, capitulo: VIDRIO, filas: ["c1-0"] },
-    // Una suma con su total y sin unitario: el unitario sale del total. Cubre dos filas.
-    { descripcion: "Mamparas V3 y V9", unidad: "glb", cantidad: 1, precio_unitario: 3310, total: 3310, capitulo: VIDRIO, filas: ["c1-1", "c1-2"] },
-    // Nadie lo había cotizado: sin fila, abre la suya en la matriz.
+    // Con su total y sin unitario: el unitario sale del total. NOVA lo ubicó como la suma de dos filas: totaliza, y no va contra las de nadie.
+    { descripcion: "Mamparas V3 y V9", unidad: "glb", cantidad: 1, precio_unitario: 3310, total: 3310, capitulo: VIDRIO, filas: [], suma: true },
+    // Nadie lo había cotizado: sin fila, abre la suya en la matriz. Es un ítem.
     { descripcion: "Mosquiteros", unidad: "glb", cantidad: 1, precio_unitario: 300, total: 300, capitulo: VIDRIO, filas: [] },
+    // NOVA dijo que totaliza: aunque le haya puesto una fila, no se ubica.
+    { descripcion: "Ventanería completa instalada", unidad: "glb", cantidad: 1, precio_unitario: 9000, total: 9000, capitulo: VIDRIO, filas: [], suma: true },
   ]);
   assert.deepEqual(c.totales, { subtotal: 4490, iva: 673.5, total: 5163.5, descuento_pct: null, descuento_monto: null,
     condiciones: "Validez 15 días. 60 % de anticipo. No incluye obra civil." });
@@ -78,10 +84,10 @@ test("lo leído queda con el capítulo de cada renglón y la fila en la que cae:
 test("un capítulo o una fila que no existen se descartan, y una fila que ya tomó un renglón no se repite en el siguiente", () => {
   const c = cotizacionDeLaLectura({ rubros: [
     { descripcion: "a", cantidad: 1, precio_unitario: 10, capitulo: 99, filas: [1, 77] },
-    { descripcion: "b", cantidad: 1, precio_unitario: 10, capitulo: null, filas: [1, 2] },
+    { descripcion: "b", cantidad: 1, precio_unitario: 10, capitulo: null, filas: [1] },
     { descripcion: "c", cantidad: 1, precio_unitario: 10, capitulo: "3", filas: 3 },
   ] }, { capitulos: CAPITULOS, filas: FILAS });
-  assert.deepEqual(c.renglones.map(r => [r.capitulo, r.filas]), [["", ["c1-0"]], ["", ["c1-1"]], [VIDRIO, ["c1-2"]]]);
+  assert.deepEqual(c.renglones.map(r => [r.capitulo, r.filas, r.suma]), [["", ["c1-0"], undefined], ["", [], undefined], [VIDRIO, ["c1-2"], undefined]]);
   assert.equal(c.totales.condiciones, null);
   // Sin nada contra qué ubicarla —la primera del presupuesto—, todo queda en su propia fila.
   assert.deepEqual(cotizacionDeLaLectura({ rubros: [{ descripcion: "a", cantidad: 2, precio_unitario: 5, capitulo: 1, filas: [1] }] }).renglones,
@@ -144,7 +150,7 @@ test("el presupuesto: el botón abre la matriz, y lo elegido entra a su capítul
   // «ARRIBA SE PUEDE VER TOTAL DE LA OFERTA Y SI SE DESPLIEGA SE VE EL ITEMIZADO».
   assert.match(m, /className="total-de-la-oferta"/);
   assert.match(m, /className="desplegar-capitulo" aria-expanded=\{abierto\}/);
-  assert.match(m, /\{abierto && \(\s+<tbody>\s+\{g\.filas\.map\(f => \(/);
+  assert.match(m, /\{abierto && \(\s+<tbody>[\s\S]{0,200}\{\[\.\.\.totales, \.\.\.itemizadas\]\.map\(f => \(/);
   // «SE DEBEN PODER VER»: el papel original de cada empresa, y sus condiciones.
   assert.match(m, /className="ver-el-papel"[^>]*onClick=\{\(\) => abrirOriginal\(papel\)\}/);
   assert.match(m, /className="condiciones-de-la-oferta"/);

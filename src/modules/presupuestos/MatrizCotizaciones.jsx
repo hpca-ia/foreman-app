@@ -22,10 +22,14 @@
 //     cotizada, con lo de cada empresa al lado. Las filas no son los rubros
 //     del presupuesto: son lo que las empresas cotizaron.
 //
-//   · La empresa que mandó una sola suma se compara por su total; su parte en
-//     cada fila es una estimación y se marca. «Con las actualizaciones se
-//     irán emparejando los rubros»: cuando mande el detalle, sube como
-//     versión nueva y cae en las mismas filas.
+//   · LA QUE TOTALIZÓ SE COMPARA POR SU TOTAL. «Window World totalizó, Easy
+//     Home totalizó y Dekorando sí lo itemizó... eventualmente se itemizan
+//     todas con sus versiones nuevas y se compara». Su total va arriba, y en
+//     el itemizado tiene su fila, sola: no se le inventa un valor por cada
+//     ventana para ponerlo al lado de los de quien itemizó («¿de dónde sacas
+//     los valores de cada renglón de Easy Home?»), ni se dice que «no cotizó»
+//     las filas de la otra. Cuando mande el detalle, sube como versión nueva y
+//     sus renglones caen en las filas de las otras.
 //
 //   · De cada empresa se abre EL PAPEL ORIGINAL, y se leen sus condiciones.
 //
@@ -61,12 +65,7 @@ const plata = v => n(v).toLocaleString("es-EC", { minimumFractionDigits: 2, maxi
 const cant = v => n(v).toLocaleString("es-EC", { maximumFractionDigits: 2 });
 const pct = v => `${v > 0 ? "+" : "−"}${Math.abs(v).toLocaleString("es-EC", { maximumFractionDigits: 1 })} %`;
 const dia = f => (f ? new Date(f).toLocaleDateString("es-EC", { day: "numeric", month: "short" }) : "");
-const QUE_PASO = { subio: "subió", bajo: "bajó", nuevo: "ahora lo cotiza", ya_no: "ya no lo cotiza", cantidad: "mismo precio, otra cantidad" };
-const DE_DONDE = {
-  otras: "repartida en proporción a lo que detallaron las otras empresas",
-  iguales: "repartida a partes iguales, porque no hay con qué medir la proporción",
-};
-
+const QUE_PASO = { subio: "subió", bajo: "bajó", nuevo: "ahora lo cotiza", ya_no: "ya no lo cotiza", cantidad: "mismo precio, otra cantidad", itemizo: "ahora viene itemizado" };
 const th = { padding: "8px 9px", textAlign: "right", verticalAlign: "top", borderBottom: `1.5px solid ${colors.border}`, fontSize: 11.5, minWidth: 158 };
 const td = { padding: "6px 9px", textAlign: "right", verticalAlign: "top", borderBottom: `1px solid ${colors.neutralSoft}`, fontSize: 12 };
 const chico = { fontSize: 10.5, color: colors.muted, lineHeight: 1.4 };
@@ -364,12 +363,11 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
             title={sinLugar ? "Primero decí a qué capítulo va" : todas ? "Soltar a esta empresa en este capítulo" : `Elegir a ${e.proveedor} para ${g.capitulo}`}
             style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar && !sinLugar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px", marginTop: 1,
               border: `1.5px solid ${todas ? colors.brand : "transparent"}`, background: todas ? colors.brandSoft : "transparent", color: colors.ink }}>
-            <span className="total-de-la-oferta" style={{ fontSize: 14, fontWeight: 700 }}>{s.estimado ? "≈ " : ""}${plata(s.total)}</span>
+            <span className="total-de-la-oferta" style={{ fontSize: 14, fontWeight: 700 }}>${plata(s.total)}</span>
             {g.menor === String(e.id) && <span className="menor" style={pastilla(colors.success, colors.successSoft)}>MENOR</span>}
             {todas && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
             {todas && <div style={{ ...chico, color: colors.brand, fontWeight: 600 }}>elegida para el capítulo</div>}
             {s.faltan > 0 && <div style={{ ...chico, color: colors.warning }}>no cotizó {s.faltan === 1 ? "1 fila" : `${s.faltan} filas`} que otra sí</div>}
-            {s.estimado && <div style={chico}>estimado: su suma también cubre otro capítulo</div>}
             {!todas && puedeEditar && !sinLugar && <div className="elegir-esta" style={{ ...chico, color: colors.brand, fontWeight: 600, textDecoration: "underline" }}>elegir</div>}
           </button>
         ) : (
@@ -388,7 +386,10 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         )}
         <div style={{ ...chico, fontWeight: 400 }}>
           {e.version > 1 && <span className="version" style={{ color: colors.inkSoft, fontWeight: 600 }}>versión {e.version} · </span>}
-          {otros.length > 0 ? `${aca} de sus ${e.renglones.length} renglones` : `${e.renglones.length} ${e.renglones.length === 1 ? "renglón: mandó una sola suma" : "renglones"}`}
+          {/* TOTALIZÓ O ITEMIZÓ: de eso depende cómo se la compara. */}
+          {s && <span className="como-cotizo" style={{ fontWeight: 700, color: s.totaliza ? colors.warning : colors.inkSoft }}>{s.totaliza ? "totalizó" : "itemizó"} · </span>}
+          {otros.length > 0 ? `${aca} de sus ${e.renglones.length} renglones` : `${e.renglones.length} ${e.renglones.length === 1 ? "renglón" : "renglones"}`}
+          {s?.totaliza && <div className="por-su-total">se compara por su total, no fila por fila</div>}
           {cuadre.cuadra === false && <span style={{ color: colors.warning }}> · su papel dice ${plata(cuadre.escrito)}: revisá si falta un renglón</span>}
         </div>
         {e.sinCapitulo > 0 && <div className="sin-capitulo" style={{ ...chico, fontWeight: 600, color: colors.warning }}>falta decir a qué capítulo va: en «renglones»</div>}
@@ -500,10 +501,10 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
       )}
       {renglonesVistos.map(r => {
         const grupo = matriz.grupos.find(g => g.capitulo === r.capitulo);
-        const propia = r.vivas?.length === 1 && Object.keys(grupo?.filas.find(f => f.clave === r.vivas[0])?.celdas || {}).length <= 1;
-        // Las filas de su capítulo que pusieron otras empresas, y que esta todavía no ocupa.
-        const libres = (grupo?.filas || []).filter(f => !f.celdas[enRevision.id] && Object.keys(f.celdas).length > 0);
-        const suyas = (r.vivas || []).map(clave => grupo?.filas.find(f => f.clave === clave)).filter(Boolean);
+        const suFila = grupo?.filas.find(x => x.clave === r.vivas?.[0]);
+        const propia = !suFila || Object.keys(suFila.celdas).length <= 1;
+        // Las filas que otra empresa itemizó en su capítulo, y que esta todavía no ocupa.
+        const libres = (grupo?.filas || []).filter(x => !x.suma && !x.celdas[enRevision.id]);
         return (
           <div key={r.k} className="renglon-de-la-cotizacion" style={{ display: "flex", gap: 10, alignItems: "flex-start", flexWrap: "wrap", padding: "6px 0", borderTop: `1px solid ${colors.neutralSoft}` }}>
             <div style={{ flex: 1, minWidth: 230, fontSize: 12, color: colors.ink }}>
@@ -512,15 +513,16 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
             </div>
             <div style={{ flex: 1, minWidth: 260, fontSize: 11.5, display: "grid", gap: 3 }}>
               {soloLectura ? <div style={{ color: colors.inkSoft }}>{r.capitulo || "sin capítulo"}</div> : (
-                <select className="capitulo-del-renglon" style={selector} value={r.capitulo} onChange={ev => enRenglon(enRevision, r.k, { capitulo: ev.target.value, filas: [] })}>
+                <select className="capitulo-del-renglon" style={selector} value={r.capitulo} onChange={ev => enRenglon(enRevision, r.k, { capitulo: ev.target.value, filas: [], ...(r.esSuma ? { suma: true } : {}) })}>
                   <option value="">sin capítulo…</option>
                   {nombresDeCapitulos.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               )}
-              {/* EN QUÉ FILA CAE: la suya, la misma que otra empresa, o varias si es una suma. */}
-              {suyas.length > 1 && <div className="es-una-suma" style={{ color: colors.inkSoft, fontSize: 10.5 }}>es una suma: cubre {suyas.length} filas de lo que detallaron las otras</div>}
-              {!propia && suyas.length === 1 && <div style={{ color: colors.inkSoft, fontSize: 10.5 }}>en la misma fila que: {String(suyas[0].descripcion).slice(0, 70)}</div>}
-              {propia && <div style={{ color: colors.muted, fontSize: 10.5 }}>en su propia fila: nadie más lo cotizó así</div>}
+              {/* TOTALIZA —un solo valor por todo, que se compara por su total— O ES UN ÍTEM, que cae en la fila
+                  de lo mismo que cotizó otra empresa, o en la suya. Lo propone NOVA; acá se corrige. */}
+              {r.esSuma && <div className="es-una-suma" style={{ color: colors.warning, fontSize: 10.5, fontWeight: 600 }}>totalizó: se compara por su total, no fila por fila</div>}
+              {!r.esSuma && !propia && <div style={{ color: colors.inkSoft, fontSize: 10.5 }}>en la misma fila que: {String(suFila.descripcion).slice(0, 70)}</div>}
+              {!r.esSuma && propia && <div style={{ color: colors.muted, fontSize: 10.5 }}>ítem en su propia fila: nadie más lo cotizó así</div>}
               {r.fuera && <div className="renglon-fuera" style={{ color: colors.warning, fontSize: 10.5, fontWeight: 600 }}>fuera de la comparación: no cuenta en su total</div>}
               {!soloLectura && (
                 <button className={r.fuera ? "poner-renglon" : "sacar-renglon"} style={{ ...enlace, color: r.fuera ? colors.brand : colors.muted, textAlign: "left" }}
@@ -528,20 +530,19 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                   {r.fuera ? "volver a ponerlo en la comparación" : "sacarlo de la comparación"}
                 </button>
               )}
-              {!soloLectura && !r.fuera && r.capitulo && libres.length > 0 && (
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <select className="misma-fila-que" style={{ ...selector, color: colors.brand }} value=""
-                    onChange={ev => ev.target.value && enRenglon(enRevision, r.k, { filas: propia ? [ev.target.value] : [...(r.vivas || []), ev.target.value] })}>
-                    <option value="">{propia ? "es lo mismo que…" : "+ también cubre…"}</option>
-                    {libres.map(f => <option key={f.clave} value={f.clave}>{String(f.descripcion).slice(0, 80)}</option>)}
-                  </select>
-                  <button className="cubre-todo" style={enlace} title="Es una sola suma de todo lo que las otras detallaron en este capítulo"
-                    onClick={() => enRenglon(enRevision, r.k, { filas: [...(propia ? [] : (r.vivas || [])), ...libres.map(f => f.clave)] })}>
-                    es la suma de todo lo que detallaron las otras ({libres.length})
-                  </button>
-                </div>
+              {!soloLectura && !r.fuera && (r.esSuma
+                ? <button className="es-un-item" style={{ ...enlace, color: colors.muted, textAlign: "left" }} title="Es un ítem con su medida, no un valor global: se compara fila por fila"
+                  onClick={() => enRenglon(enRevision, r.k, { suma: false, filas: [] })}>no es un total: es un ítem</button>
+                : <button className="es-un-total" style={{ ...enlace, textAlign: "left" }} title="Un solo valor por todo el trabajo, sin detallar: se compara por su total"
+                  onClick={() => enRenglon(enRevision, r.k, { suma: true, filas: [] })}>totalizó: es un solo valor por todo</button>)}
+              {!soloLectura && !r.fuera && !r.esSuma && r.capitulo && libres.length > 0 && (
+                <select className="misma-fila-que" style={{ ...selector, color: colors.brand }} value=""
+                  onChange={ev => ev.target.value && enRenglon(enRevision, r.k, { filas: [ev.target.value] })}>
+                  <option value="">{propia ? "es lo mismo que…" : "no: es lo mismo que…"}</option>
+                  {libres.map(x => <option key={x.clave} value={x.clave}>{String(x.descripcion).slice(0, 80)}</option>)}
+                </select>
               )}
-              {!soloLectura && !propia && !r.fuera && <button className="a-su-propia-fila" style={{ ...enlace, color: colors.muted, textAlign: "left" }} onClick={() => enRenglon(enRevision, r.k, { filas: [] })}>ponerlo en su propia fila</button>}
+              {!soloLectura && !r.esSuma && !propia && !r.fuera && <button className="a-su-propia-fila" style={{ ...enlace, color: colors.muted, textAlign: "left" }} onClick={() => enRenglon(enRevision, r.k, { filas: [] })}>ponerlo en su propia fila</button>}
             </div>
           </div>
         );
@@ -563,7 +564,7 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
       <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.55, marginBottom: 10, maxWidth: 900 }}>
         Subí las cotizaciones de cada empresa: quedan guardadas acá y <strong>no entran al presupuesto</strong> hasta que elijas.{" "}
         <strong>Cada capítulo tiene su matriz</strong>, con las empresas que lo cotizaron: arriba, el total de cada oferta; desplegala para ver el itemizado,
-        fila por fila. Para mandar una al presupuesto: tocá <strong>«elegir»</strong> bajo su total en el capítulo y después <strong>«Pasar lo elegido al presupuesto»</strong>,
+        fila por fila. La que totalizó se compara por su total, hasta que mande su versión itemizada. Para mandar una al presupuesto: tocá <strong>«elegir»</strong> bajo su total en el capítulo y después <strong>«Pasar lo elegido al presupuesto»</strong>,
         debajo de las matrices: sus rubros entran al capítulo.
       </div>
 
@@ -600,6 +601,9 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
         const abierto = abiertos.has(g.capitulo);
         const suyas = empresasDe(g);
         const raya = abierto ? th.borderBottom : "none";
+        // Lo que alguna itemizó, y los totales de las que totalizaron: van aparte.
+        const itemizadas = g.filas.filter(x => !x.suma), totales = g.filas.filter(x => x.suma);
+        const deQuienEs = x => suyas.find(e => x.celdas[e.id]);
         return (
           <Fragment key={`m${g.capitulo}`}>
             <div className="matriz-del-capitulo" data-capitulo={g.capitulo} style={{ ...caja, padding: 0, overflowX: "auto" }}>
@@ -614,7 +618,11 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                       </button>
                       <div style={{ ...chico, fontWeight: 400 }}>
                         {sinLugar ? "decí a qué capítulo va, en «renglones y condiciones» de la empresa"
-                          : `${suyas.length} ${suyas.length === 1 ? "empresa" : "empresas"} · ${g.filas.length} ${g.filas.length === 1 ? "fila cotizada" : "filas cotizadas"}${g.fuera.length ? ` · ${g.fuera.length} fuera de la comparación` : ""} · ${abierto ? "tocá para cerrar el itemizado" : "tocá para ver el itemizado"}`}
+                          : [`${suyas.length} ${suyas.length === 1 ? "empresa" : "empresas"}`,
+                            itemizadas.length ? `${itemizadas.length} ${itemizadas.length === 1 ? "fila itemizada" : "filas itemizadas"}` : "",
+                            totales.length ? `${totales.length} ${totales.length === 1 ? "total" : "totales"}` : "",
+                            g.fuera.length ? `${g.fuera.length} fuera de la comparación` : "",
+                            abierto ? "tocá para cerrar el itemizado" : "tocá para ver el itemizado"].filter(Boolean).join(" · ")}
                       </div>
                     </th>
                     <th className="presupuesto-del-capitulo" style={{ ...th, minWidth: 118, width: ANCHO_DEL_PRESUPUESTO, color: colors.inkSoft, borderBottom: raya }}>
@@ -627,12 +635,14 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                 </thead>
                 {abierto && (
                   <tbody>
-                    {g.filas.map(f => (
-                      <tr key={f.clave} className="fila-cotizada" data-fila={f.clave}>
+                    {/* PRIMERO, LAS QUE TOTALIZARON: cada total en su fila, solo. No se reparte entre las filas de nadie. */}
+                    {[...totales, ...itemizadas].map(f => (
+                      <tr key={f.clave} className={f.suma ? "fila-de-total" : "fila-cotizada"} data-fila={f.clave} style={f.suma ? { background: colors.bg } : undefined}>
                         <td style={{ ...td, textAlign: "left", paddingLeft: 24 }}>
                           {f.descripcion}
                           <div style={chico}>
-                            {cant(f.cantidad)} {f.unidad}
+                            {f.suma ? <><strong style={{ color: colors.inkSoft }}>{deQuienEs(f)?.proveedor || "Esta empresa"} totalizó</strong>: un solo valor por todo, sin itemizar</>
+                              : <>{cant(f.cantidad)} {f.unidad}</>}
                             {puedeEditar && !sinLugar && <> · <button className="sacar-fila" style={{ ...enlace, color: colors.muted }}
                               title="No todas la cotizaron, o no va en este pedido: deja de contar en los totales, y se puede volver a poner"
                               onClick={() => sacarFila(f.clave)}>sacar de la comparación</button></>}
@@ -646,31 +656,25 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                         </td>
                         {suyas.map(e => {
                           const x = f.celdas[e.id];
-                          if (!x) return <td key={e.id} style={{ ...td, color: g.sub[e.id] ? colors.warning : colors.muted, fontSize: 11 }}>{g.sub[e.id] ? "no cotizó" : "—"}</td>;
+                          // La que totalizó no «no cotizó» esta fila: va en su total. La que itemizó y no la tiene, sí.
+                          if (!x) {
+                            const como = f.suma || !g.sub[e.id] ? "—" : g.sub[e.id].totaliza ? "totalizó" : "no cotizó";
+                            return <td key={e.id} className={como === "totalizó" ? "celda-de-quien-totalizo" : undefined} title={como === "totalizó" ? "Cotizó un solo valor por todo: no dijo cuánto vale esta fila" : undefined} style={{ ...td, color: como === "no cotizó" ? colors.warning : colors.muted, fontSize: 11 }}>{como}</td>;
+                          }
                           const elegida = elegidaEn(f.clave, e.id);
                           const antes = e.reemplaza_a != null ? matrizDeAntes.celdaDe(f.clave, e.reemplaza_a) : null;
-                          const eraOtro = antes && x.tipo === "rubro" && antes.tipo === "rubro" && Math.abs(antes.unitario - x.unitario) > 0.00005;
+                          const eraOtro = antes && Math.abs(antes.unitario - x.unitario) > 0.00005;
                           return (
                             <td key={e.id} style={{ ...td, padding: 3 }}>
                               <button className="celda-cotizada" onClick={() => tocar(e.id, { fila: f.clave })} disabled={!puedeEditar || sinLugar}
-                                title={x.tipo === "paquete" ? `Es parte de su suma «${x.descripcion}»: se elige o se suelta entera` : elegida ? "Soltar esta fila" : `Elegir a ${e.proveedor} para esta fila`}
+                                title={elegida ? "Soltar esta fila" : f.suma ? `Elegir el total de ${e.proveedor}: es por todo el capítulo` : `Elegir a ${e.proveedor} para esta fila`}
                                 style={{ width: "100%", textAlign: "right", fontFamily: colors.font, cursor: puedeEditar && !sinLugar ? "pointer" : "default", borderRadius: 7, padding: "4px 6px",
                                   border: `1.5px solid ${elegida ? colors.brand : "transparent"}`, background: elegida ? colors.brandSoft : "transparent", color: colors.ink }}>
-                                {x.tipo === "rubro" ? (
-                                  <>
-                                    <span style={{ fontSize: 12, fontWeight: 600 }}>${plata(x.total)}</span>
-                                    {f.menor === String(e.id) && <span className="menor" style={pastilla(colors.success, colors.successSoft)}>MENOR</span>}
-                                    {elegida && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
-                                    <div style={chico}>{cant(x.cantidad)} {x.unidad} × ${plata(x.unitario)}{x.otraCantidad ? " · otra cantidad" : ""}</div>
-                                    {eraOtro && <div className="antes" style={{ ...chico, color: x.unitario > antes.unitario ? colors.danger : colors.success }}>antes ${plata(antes.unitario)}</div>}
-                                  </>
-                                ) : (
-                                  <>
-                                    <span style={{ fontSize: 12, fontWeight: 600, color: colors.inkSoft }}>≈ ${plata(x.parte)}</span>
-                                    {elegida && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
-                                    <div className="de-su-suma" style={chico}>de su suma, ${plata(x.totalDelPaquete)}</div>
-                                  </>
-                                )}
+                                <span style={{ fontSize: 12, fontWeight: 600 }}>${plata(x.total)}</span>
+                                {f.menor === String(e.id) && <span className="menor" style={pastilla(colors.success, colors.successSoft)}>MENOR</span>}
+                                {elegida && <Check size={11} color={colors.brand} style={{ marginLeft: 4, verticalAlign: -1 }} />}
+                                <div style={chico}>{cant(x.cantidad)} {x.unidad} × ${plata(x.unitario)}{x.otraCantidad ? " · otra cantidad" : ""}</div>
+                                {eraOtro && <div className="antes" style={{ ...chico, color: x.unitario > antes.unitario ? colors.danger : colors.success }}>antes ${plata(antes.unitario)}</div>}
                               </button>
                             </td>
                           );
@@ -773,7 +777,7 @@ export default function MatrizCotizaciones({ presupuesto, capitulos = [], items 
                     <div style={{ flex: 1, minWidth: 240 }}>
                       {x.descripcion}
                       <div style={chico}>
-                        {x.proveedor}{x.repartido ? " · es su suma de varias filas: entra como un solo rubro" : ""}
+                        {x.proveedor}{x.suma ? " · totalizó: entra como un solo rubro" : ""}
                         {x.id == null ? " · rubro nuevo" : x.emparejado && !x.proveedorAntes ? " · se empareja con ese rubro, que conserva sus palabras"
                           : ` · ya estaba${x.proveedorAntes && x.proveedorAntes !== x.proveedor ? `, de ${x.proveedorAntes}` : ""}: se actualiza`}
                       </div>
