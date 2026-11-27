@@ -23,6 +23,7 @@ import { avisosDelTablero } from "./lib/avisos";
 import CargadorDeAvisos from "./components/CargadorDeAvisos";
 import VisorDeArchivo from "./components/VisorDeArchivo";
 import AvisoDeVersionNueva from "./components/AvisoDeVersionNueva";
+import { adondeVolver, recargar, hayUnaNuevaConocida, nadaAMedias, loQueHayAbierto } from "./lib/versionNueva";
 import { avisosDelPipeline, esMiAviso, diaCorto, etapaAlCrear } from "./modules/leads/pipeline";
 import { aprobacionesVencidas, esMiAprobacion } from "./modules/leads/aprobaciones.js";
 import { anotar as anotarEnProyecto, anotarEnLaTarea } from "./modules/leads/proyecto";
@@ -66,7 +67,8 @@ export default function App() {
   const [usuario, setUsuario] = useState(null);
   const [tareas, setTareas] = useState([]);
   const [cargando, setCargando] = useState(false);
-  const [vistaPedida, setVista] = useState("tareas");
+  // Después de una recarga para traer la versión nueva, vuelve al módulo donde estaba.
+  const [vistaPedida, setVista] = useState(() => adondeVolver() || "tareas");
   // El presupuesto cuyo cronograma se pidió abrir desde Presupuestos.
   const [cronoPedido, setCronoPedido] = useState(null);
   const [vistaTareas, setVistaTareas] = useState("lista");
@@ -455,6 +457,10 @@ export default function App() {
     return "tareas";
   };
   const vista = vistaPedida === "tareas" && !puede("tareas.ver") ? primeraVista() : vistaPedida;
+  // CAMBIAR DE MÓDULO CON UNA VERSIÓN NUEVA PUBLICADA: se recarga ahí, ya en el
+  // módulo pedido. Lo que se deja atrás se iba a cerrar igual; si queda algo a
+  // medio escribir, se cambia como siempre y el aviso de abajo sigue.
+  const irA = v => (hayUnaNuevaConocida() && nadaAMedias({ ...loQueHayAbierto(), margen: 1500 }) ? recargar({ vista: v }) : setVista(v));
 
   const veTodo = puede("tareas.todas");
   // Quien no ve todo solo elige entre los proyectos donde es miembro.
@@ -631,6 +637,7 @@ export default function App() {
         alertCount={alertCount} onOpenAlerts={() => { setVista("tareas"); setShowAlerts(true); }}
         admin={puede("ajustes.ver")} onOpenAjustes={() => setShowAjustes(true)}
         usuario={usuario} onLogout={logout}
+        onRecargar={() => recargar({ vista })}
         onNuevaTarea={() => { setEditTask(null); setShowModal(true); }}
         // El buscador del encabezado busca en el tablero; en los otros módulos
         // cada pantalla tiene el suyo y dos buscadores arriba del otro hacen
@@ -640,7 +647,7 @@ export default function App() {
       />
 
       <div className="app-shell-layout" style={{ display: "flex", flex: 1, maxWidth: 1600, margin: "0 auto", width: "100%" }}>
-        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={setVista} admin={admin} verPipeline={verPipeline}
+        <Sidebar puede={puede} usuario={usuario} empresa={empresa} vista={vista} setVista={irA} admin={admin} verPipeline={verPipeline}
           pendientes={{ observaciones: misObs.length, compras: comprasQueMeTocan.length }} />
 
         <div className="app-content" style={{ flex: 1, overflowY: "auto", minHeight: "calc(100vh - 54px)" }}>
@@ -783,7 +790,7 @@ export default function App() {
       {/* El visor de archivos: uno solo para todo FOREMAN. Lo abre `abrirArchivo`. */}
       <VisorDeArchivo />
       {/* Una pestaña abierta sigue con el código de antes: que avise cuando se publicó otro. */}
-      <AvisoDeVersionNueva />
+      <AvisoDeVersionNueva vista={vista} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { VERSION, COMPILADO } from "../version";
-import { Search, X, AlertTriangle, Settings, LogOut, Plus } from "lucide-react";
+import { Search, X, AlertTriangle, Settings, LogOut, Plus, RefreshCw } from "lucide-react";
 import { colors } from "../theme/colors";
 import { logoEmpresa } from "../lib/marca";
 import Avatar from "./ui/Avatar";
@@ -16,7 +16,7 @@ import Button from "./ui/Button";
 // Ahora el buscador y el botón son los de la pantalla donde uno está, y donde
 // esa pantalla tiene lo suyo —Compras busca compras, Observaciones crea
 // observaciones— el encabezado no repite nada: se corre y deja lugar.
-export default function Header({ busqueda, setBusqueda, alertCount, onOpenAlerts, admin, onOpenAjustes, usuario, onLogout, onNuevaTarea, buscaAca = true, accion = null }) {
+export default function Header({ busqueda, setBusqueda, alertCount, onOpenAlerts, admin, onOpenAjustes, usuario, onLogout, onNuevaTarea, buscaAca = true, accion = null, onRecargar = null }) {
   // Si el logo no carga queda la "F": la marca nunca desaparece del encabezado.
   const [sinLogo, setSinLogo] = useState(false);
   return (
@@ -40,6 +40,17 @@ export default function Header({ busqueda, setBusqueda, alertCount, onOpenAlerts
             style={{ background: colors.neutralSoft, color: colors.muted, fontSize: 9, fontWeight: 600, padding: "1px 5px", borderRadius: 4 }}>
             BETA · {VERSION}
           </span>
+          {/* LA FLECHA PARA RECARGAR, la de FOREMAN. Hernán, desde el iPad:
+              «¿Cómo recargo la página? No tiene flecha redonda. Hago abajo, no
+              funciona». Abierto desde la pantalla de inicio no hay barra de
+              Safari, y deslizar hacia abajo no recarga. Esta trae lo último
+              publicado y vuelve al mismo módulo. */}
+          {onRecargar && (
+            <button className="recargar-foreman" onClick={onRecargar} title="Recargar FOREMAN: trae lo último publicado" aria-label="Recargar FOREMAN"
+              style={{ background: "none", border: "none", padding: 4, margin: "0 -4px", color: colors.muted, cursor: "pointer", display: "flex", alignItems: "center" }}>
+              <RefreshCw size={14} />
+            </button>
+          )}
         </div>
         {buscaAca ? (
           <div className="header-search" style={{ background: colors.neutralSoft, borderRadius: colors.radiusMd, padding: "4px 12px", display: "flex", alignItems: "center", gap: 8 }}>

@@ -55,6 +55,10 @@ input, select, textarea { outline: none; font-family: var(--font); }
 @media (max-width: 640px) {
   .header-search { display: none !important; }
   .header-label { display: none !important; }
+  /* La flecha de recargar, desde la tablet para arriba: en el teléfono no
+     entraba sin empujar el «+» fuera de la pantalla, y ahí FOREMAN igual se
+     actualiza solo al volver a la app o al cambiar de módulo. */
+  .recargar-foreman { display: none !important; }
   /* En el teléfono la marca completa empujaba a "Nueva tarea" fuera de la
      pantalla: la misma marca, más chica, y todo entra. */
   .app-marca { gap: 7px !important; }

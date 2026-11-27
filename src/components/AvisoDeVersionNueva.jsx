@@ -1,41 +1,70 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { hayVersionNueva, laQueCorre } from "../lib/versionNueva.js";
+import { hayVersionNueva, laQueCorre, hayUnaNuevaConocida, anotarQueHayNueva, vigilarLoQueSeEscribe,
+  cuandoSeEscribio, nadaAMedias, loQueHayAbierto, recargar } from "../lib/versionNueva.js";
 
 // «HAY UNA VERSIÓN NUEVA DE FOREMAN».
 //
 // Una pestaña abierta sigue con el código con que se cargó. Si mientras tanto
 // se publicó un arreglo, quien la tiene abierta sigue viendo —y tocando— lo de
 // antes, sin manera de saberlo (lib/versionNueva.js cuenta la tarde en que
-// pasó). Esto lo dice, abajo, encima de lo que haya abierto, con el botón para
-// recargar. No recarga solo: se puede estar a mitad de escribir algo.
+// pasó).
 //
 // Mira cada tres minutos mientras la pestaña está a la vista, y al volver a
-// ella. Una vez que avisó, no pregunta más.
+// ella. AL VOLVER A FOREMAN desde otra app, si hay una nueva, se recarga sola
+// y vuelve al mismo módulo: así lo pidió Hernán desde el iPad, donde no hay
+// flecha para recargar. Solo si no queda nada a medias; si queda, o si la
+// nueva aparece mientras se la está usando, lo dice abajo con el botón.
 
 const CADA = 3 * 60 * 1000;
+// Lo escrito en el último minuto antes de irse puede estar en un formulario
+// que se guarda con su botón: eso no se recarga solo.
+const ESCRITO_AL_IRSE = 60 * 1000;
+// Al volver, lo que quedó en camino cuando la app se fue al fondo termina de
+// guardarse antes de recargar.
+const PAUSA = 1500;
 
-export default function AvisoDeVersionNueva() {
+export default function AvisoDeVersionNueva({ vista = "" }) {
   const [hay, setHay] = useState(false);
+  const vistaRef = useRef(vista); vistaRef.current = vista;
 
   useEffect(() => {
     // En desarrollo el código no lleva número: no hay con qué comparar.
-    if (hay || !laQueCorre()) return undefined;
-    let vivo = true, ultima = 0;
-    const mirar = async () => {
-      if (document.visibilityState !== "visible" || Date.now() - ultima < 60000) return;
-      ultima = Date.now();
-      if ((await hayVersionNueva()) && vivo) setHay(true);
+    if (!laQueCorre()) return undefined;
+    const dejarDeVigilar = vigilarLoQueSeEscribe();
+    // Cada camino lleva su cuenta: si el «focus» de la vuelta llega antes que
+    // el cambio de visibilidad, no le tapa la recarga a este.
+    let vivo = true, ultima = 0, ultimaVuelta = 0, oculta = 0;
+    const mirar = async ({ volvio = false } = {}) => {
+      if (document.visibilityState !== "visible") return;
+      if (volvio ? Date.now() - ultimaVuelta < 5000 : Date.now() - ultima < 60000) return;
+      if (volvio) ultimaVuelta = Date.now(); else ultima = Date.now();
+      const nueva = hayUnaNuevaConocida() || (await hayVersionNueva());
+      if (!nueva || !vivo) return;
+      anotarQueHayNueva();
+      if (volvio && oculta - cuandoSeEscribio() >= ESCRITO_AL_IRSE) {
+        await new Promise(r => setTimeout(r, PAUSA));
+        if (vivo && document.visibilityState === "visible" && nadaAMedias(loQueHayAbierto())) {
+          recargar({ vista: vistaRef.current });
+          return;
+        }
+      }
+      setHay(true);
     };
-    const reloj = setInterval(mirar, CADA);
-    document.addEventListener("visibilitychange", mirar);
-    window.addEventListener("focus", mirar);
+    const alCambiar = () => {
+      if (document.visibilityState === "hidden") { oculta = Date.now(); return; }
+      mirar({ volvio: oculta > 0 });
+    };
+    const alEnfocar = () => mirar();
+    const reloj = setInterval(alEnfocar, CADA);
+    document.addEventListener("visibilitychange", alCambiar);
+    window.addEventListener("focus", alEnfocar);
     return () => {
-      vivo = false; clearInterval(reloj);
-      document.removeEventListener("visibilitychange", mirar);
-      window.removeEventListener("focus", mirar);
+      vivo = false; clearInterval(reloj); dejarDeVigilar();
+      document.removeEventListener("visibilitychange", alCambiar);
+      window.removeEventListener("focus", alEnfocar);
     };
-  }, [hay]);
+  }, []);
 
   if (!hay) return null;
   return (
@@ -47,7 +76,7 @@ export default function AvisoDeVersionNueva() {
         <strong>Hay una versión nueva de FOREMAN.</strong> Lo que ves puede ser lo de antes.
         <span style={{ opacity: 0.75 }}> Si estás escribiendo algo, guardalo primero.</span>
       </span>
-      <button className="actualizar-foreman" onClick={() => window.location.reload()}
+      <button className="actualizar-foreman" onClick={() => recargar({ vista: vistaRef.current })}
         style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#fff", color: "#0F3D3E", border: "none", borderRadius: 7,
           padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
         <RefreshCw size={13} /> Actualizar
