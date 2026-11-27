@@ -6,6 +6,7 @@ import { BUCKET_PUBLICO } from "../lib/archivos";
 import { saveToStorage } from "../lib/storage";
 import { guardarUsuario, desactivarUsuario } from "../lib/equipo";
 import { esAdmin } from "../lib/roles";
+import CarpetasDeArchivos from "../modules/CarpetasDeArchivos";
 import { avisarPinNuevo, avisarPermisos, probarCorreo } from "../lib/avisoCuenta";
 import { rolInfo } from "../lib/roles";
 import Modal from "./ui/Modal";
@@ -137,7 +138,7 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
   const deleteBtn = { background: "var(--danger-soft)", border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)", padding: "4px 8px", color: "var(--danger)", cursor: "pointer", display: "inline-flex" };
 
   return (
-    <Modal onClose={onClose} maxWidth={560}>
+    <Modal onClose={onClose} maxWidth={tab === "archivos" ? 900 : 560}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>Ajustes</div>
         <button onClick={onClose} style={{ background: "var(--neutral-soft)", border: "none", borderRadius: "var(--radius-sm)", width: 28, height: 28, color: "var(--ink-soft)", cursor: "pointer", fontSize: 15 }}>×</button>
@@ -148,7 +149,10 @@ export default function PanelAjustes({ usuario, permisos, setPermisos, permisosU
         <button onClick={() => setTab("proyectos")} style={tabS(tab === "proyectos")}>Proyectos</button>
         {usuario?.role === "owner" && <button onClick={() => setTab("permisos")} style={tabS(tab === "permisos")}>Permisos</button>}
         {usuario?.role === "owner" && <button onClick={() => setTab("etapas")} style={tabS(tab === "etapas")}>Etapas</button>}
+        {usuario?.role === "owner" && <button onClick={() => setTab("archivos")} style={tabS(tab === "archivos")}>Archivos</button>}
       </div>
+
+      {tab === "archivos" && usuario?.role === "owner" && <CarpetasDeArchivos />}
 
       {tab === "permisos" && usuario?.role === "owner" && <PanelPermisos permisos={permisos} setPermisos={setPermisos} usuarios={users} />}
       {tab === "etapas" && usuario?.role === "owner" && <EtapasCatalogo />}
