@@ -231,18 +231,32 @@ export function estadoDeActividad(item, tarea = null, hoy = "") {
  * @param due_date  para cuándo queda (opcional): sin día, su fecha no se toca
  * @returns { error } o { nota, fecha?, sacarDeEspera }
  */
-export function alAvanzar({ item = null, texto, due_date = "" } = {}) {
+//
+// Sin día nuevo, la fecha que tenía se deja, salvo que ya haya pasado: era la
+// del paso de antes, y dejarla volvía a pintar «Venció» —o, si estaba en
+// espera, ponía al proyecto «Vencido»— justo después de contar que avanzó.
+// @param vence  la fecha que tiene la tarea ahora
+// @returns { nota, fecha?, sacarDeEspera }: `fecha` es el día nuevo, null para
+//          quitarla, o no viene si no se toca
+export function alAvanzar({ item = null, texto, due_date = "", vence = "", hoy = "" } = {}) {
   const nota = String(texto || "").trim();
   if (!nota) return { error: "Escribí qué pasó, o qué sigue." };
   const fecha = dia(due_date);
-  return { nota, ...(fecha ? { fecha } : {}), sacarDeEspera: !!item?.espera };
+  const vieja = dia(vence);
+  const quitar = !fecha && !!vieja && !!hoy && vieja < hoy;
+  return { nota, ...(fecha ? { fecha } : quitar ? { fecha: null } : {}), sacarDeEspera: !!item?.espera };
 }
 
-/** Lo que cambia en la tarea al marcarla hecha, o al volver a abrirla. */
+/**
+ * Lo que cambia en la tarea al marcarla hecha, o al volver a abrirla.
+ * En los dos casos deja de estar en espera: una terminada no espera nada, y la
+ * que se vuelve a abrir vuelve en curso. Si no, «en espera → Terminada →
+ * Volver a abrir» la traía de vuelta en espera, al fondo de la lista.
+ */
 export function alMarcar(hecha, quienNombre = null, ahora = new Date()) {
   return hecha
-    ? { status: "listo", hecha_at: ahora.toISOString(), hecha_por: quienNombre || null }
-    : { status: "en-progreso", hecha_at: null, hecha_por: null };
+    ? { status: "listo", hecha_at: ahora.toISOString(), hecha_por: quienNombre || null, espera: false }
+    : { status: "en-progreso", hecha_at: null, hecha_por: null, espera: false };
 }
 
 // ─── El checklist: pegar una lista y ver cuánto falta ──────────────────────

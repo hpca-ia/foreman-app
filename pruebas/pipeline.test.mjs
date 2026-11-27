@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   TIPOS, tipoDe, sePersigue, esProyecto, etapasDelTipo, etapaDelLead, etapaAlCambiarDeTipo,
   diasEntre, sumarDias, diaCorto, proximoPaso, estadoDelLead, enEspera, loQueDice, avisosDelPipeline, esMiAviso,
@@ -106,6 +107,9 @@ test("el próximo paso es la tarea abierta más próxima; las compras no cuentan
   // Sin ninguna con fecha, la primera que se escribió: se dice cuál es.
   assert.equal(proximoPaso([tarea({ id: 9, title: "B" }), tarea({ id: 7, title: "A" })]).title, "A");
   assert.equal(proximoPaso([tarea({ status: "listo" })]), null);
+  // Lo que está en espera no es el próximo paso (revisión del 27/11/2026).
+  assert.equal(proximoPaso([tarea({ id: 1, title: "FOGA", due_date: "2026-11-20", espera: true }), tarea({ id: 2, title: "Revit", due_date: "2026-11-30" })]).title, "Revit");
+  assert.equal(proximoPaso([tarea({ title: "FOGA", espera: true })]), null);
   assert.equal(proximoPaso(), null);
 });
 
@@ -337,4 +341,37 @@ test("el panel suma lo de los demás módulos, y primero la plata que no cuadra"
     [["atencion", "orden espera la firma del cliente", "enviada hoy"]]);
   // Mientras todavía no cargó, no rompe ni inventa.
   assert.deepEqual(avisosDelTablero({ modulos: null }), []);
+});
+
+// Revisión del 27/11/2026: «Queda en espera» sobre FOGA, que tenía una fecha ya
+// pasada, ponía al proyecto «Vencido» y lo mandaba al panel de avisos —el caso
+// exacto para el que se hizo el stand-by—, en la pantalla y en el correo.
+test("una actividad EN ESPERA no hace vencer al proyecto, ni en la pantalla ni en el correo", async () => {
+  const api = await import("../api/_avisosDelPipeline.js");
+  const resBg = lead({ id: 13, nombre: "RES BG" });
+  const tareas = [
+    tarea({ id: 196, lead_id: 13, title: "FOGA", due_date: "2026-11-20", espera: true }),
+    tarea({ id: 204, lead_id: 13, title: "MODELADO EN REVIT", due_date: "2026-11-30" }),
+  ];
+  const hoy = "2026-11-27";
+  const e = estadoDelLead(resBg, tareas, hoy);
+  assert.equal(e.clase, "al_dia");
+  assert.equal(e.abiertas, 2, "la que espera sigue abierta");
+  assert.equal(loQueDice(e), "«MODELADO EN REVIT» · en 3 días");
+  assert.deepEqual(avisosDelPipeline({ leads: [resBg], tareas, hoy }), []);
+  assert.deepEqual(api.avisosDelPipeline({ leads: [resBg], tareas, hoy }), []);
+  // Si se retoma, su fecha vuelve a contar.
+  const retomada = tareas.map(t => ({ ...t, espera: false }));
+  assert.equal(avisosDelPipeline({ leads: [resBg], tareas: retomada, hoy })[0].clase, "vencido");
+  assert.deepEqual(api.avisosDelPipeline({ leads: [resBg], tareas: retomada, hoy }), avisosDelPipeline({ leads: [resBg], tareas: retomada, hoy }));
+});
+
+test("el informe dice «en espera», no «esperando al cliente»; y al de afuera no le cuenta qué se espera", async () => {
+  const { resumenPlano } = await import("../api/_pipeline.js");
+  const d = { etapa: "Presupuesto", espera: { desde: "2026-11-24", que: "Lo retomamos más adelante" }, hechas: [], pendientes: [] };
+  assert.match(resumenPlano(d), /^Etapa: Presupuesto\.\nEn espera desde el 2026-11-24: Lo retomamos más adelante\.$/);
+  assert.match(resumenPlano(d, { paraCliente: true }), /^Etapa: Presupuesto\.\nEn espera desde el 2026-11-24\.$/);
+  const codigo = readFileSync(new URL("../api/_pipeline.js", import.meta.url), "utf8");
+  assert.doesNotMatch(codigo, /esperando_al_cliente|Esperando respuesta del cliente/);
+  assert.match(codigo, /en_espera: d\.espera \? \{ desde: d\.espera\.desde, \.\.\.\(paraCliente \? \{\} : \{ que: d\.espera\.que \}\) \} : null,/);
 });

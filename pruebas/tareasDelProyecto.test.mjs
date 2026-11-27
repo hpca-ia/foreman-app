@@ -58,7 +58,7 @@ test("sumar una tarea guarda una sola fila, con la etapa en la que está el lead
     title: "Revisión de contrato", lead_id: 15, etapa_id: "con_presupuesto", ruta_orden: 3,
     assignee_id: 1, due_date: "2026-11-14", priority: "urgente", type: "Gestión", created_by: 1,
     notes: "Gestión de Diners Aereo GYE", hora: "09:30",
-    status: "en-progreso", hecha_at: null, hecha_por: null,
+    status: "en-progreso", hecha_at: null, hecha_por: null, espera: false,
   });
   // Sin dueño ni fecha sigue siendo una tarea del proyecto.
   const suelta = filaNueva({ lead, etapaId: "con_presupuesto", titulo: "Pedir pólizas", tipo: "Otro", ahora: AHORA });
@@ -86,8 +86,10 @@ test("un envío ya ocurrió: nace cerrado, con a quién y quién lo registró", 
 });
 
 test("marcar y desmarcar escriben el estado y quién lo hizo, en la misma fila", () => {
-  assert.deepEqual(alMarcar(true, "Camila Mena", AHORA), { status: "listo", hecha_at: "2026-11-11T15:00:00.000Z", hecha_por: "Camila Mena" });
-  assert.deepEqual(alMarcar(false, "Camila Mena", AHORA), { status: "en-progreso", hecha_at: null, hecha_por: null });
+  // Terminarla o volver a abrirla le saca la espera: «en espera → Terminada → Volver a abrir» la
+  // traía de vuelta en espera, al fondo de la lista (revisión del 27/11/2026).
+  assert.deepEqual(alMarcar(true, "Camila Mena", AHORA), { status: "listo", hecha_at: "2026-11-11T15:00:00.000Z", hecha_por: "Camila Mena", espera: false });
+  assert.deepEqual(alMarcar(false, "Camila Mena", AHORA), { status: "en-progreso", hecha_at: null, hecha_por: null, espera: false });
   assert.equal(alMarcar(true).hecha_por, null);
 });
 

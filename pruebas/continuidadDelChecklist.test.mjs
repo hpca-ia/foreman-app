@@ -54,6 +54,10 @@ test("AVANZÓ: lo que sigue se anota en el MISMO punto —con su fecha, si la ti
   assert.equal(alAvanzar({ item: { ...foga, espera: true }, texto: "Llegó la cotización" }).sacarDeEspera, true);
   // Sin texto no hay nada que anotar, y se dice.
   assert.deepEqual(alAvanzar({ item: foga, texto: "   " }), { error: "Escribí qué pasó, o qué sigue." });
+  // Sin día nuevo, una fecha que ya pasó se quita: era la del paso de antes. Una que viene, se deja.
+  assert.deepEqual(alAvanzar({ item: foga, texto: "Se mandó el borrador", vence: "2026-11-20", hoy: "2026-11-27" }), { nota: "Se mandó el borrador", fecha: null, sacarDeEspera: false });
+  assert.deepEqual(alAvanzar({ item: foga, texto: "Se mandó el borrador", vence: "2026-11-30", hoy: "2026-11-27" }), { nota: "Se mandó el borrador", sacarDeEspera: false });
+  assert.deepEqual(alAvanzar({ item: foga, texto: "Otra fecha", due_date: "2026-12-04", vence: "2026-11-20", hoy: "2026-11-27" }).fecha, "2026-12-04");
   // La regla que abría otro punto ya no existe.
   assert.equal(reglas.loQueSigue, undefined);
 });
@@ -94,10 +98,17 @@ test("EL ✓ DE LA FILA PREGUNTA QUÉ PASÓ, ahí mismo, con tres botones que di
   assert.match(lista, /className="terminada" onClick=\{\(\) => \{ setPregunta\(null\); onMarcar\?\.\(true\); \}\}[\s\S]{0,300}<strong>Terminada: ya no hay más que hacer<\/strong>/);
   // AVANZÓ anota en el mismo punto: no agrega otro.
   const avanzar = lista.slice(lista.indexOf("async function avanzar(item"), lista.indexOf("const naceALaVista"));
-  assert.match(avanzar, /const r = alAvanzar\(\{ item, texto, due_date \}\);/);
+  assert.match(avanzar, /const r = alAvanzar\(\{ item, texto, due_date, vence, hoy: hoyISO\(\) \}\);/);
   assert.match(avanzar, /await anotarEnLaTarea\(item, r\.nota, currentUser, \{ alCliente:/);
-  assert.match(avanzar, /if \(r\.fecha\) \{ const e = await ponerFecha\(item, r\.fecha, currentUser\);/);
-  assert.match(avanzar, /if \(r\.sacarDeEspera\) await marcarEspera\(item, false, currentUser\);/);
+  // El día nuevo va sin la hora del paso de antes (una reunión a las 10 no se muda sola al día nuevo).
+  assert.match(avanzar, /if \(r\.fecha !== undefined\) despues\.push\(await ponerFecha\(item, r\.fecha, currentUser, null\)\);/);
+  assert.match(avanzar, /if \(r\.sacarDeEspera\) despues\.push\(await marcarEspera\(item, false, currentUser\)\);/);
+  // Lo que falla después de anotar se dice, y el cuadro se cierra: reintentar anotaba dos veces.
+  assert.match(avanzar, /if \(problemas\.length\) setError\(problemas\.join\(" "\)\);/);
+  assert.match(avanzar, /if \(aviso && !\/\^Quedó anotado\/\.test\(aviso\)\) \{ dijo = aviso; return; \}/);
+  // Un Enter doble no manda dos anotaciones; y la fila le pasa la fecha que tiene.
+  assert.match(lista, /const guardarPaso = async \(\) => \{\s+if \(enviando\.current\) return;\s+enviando\.current = true;/);
+  assert.match(lista, /vence: tarea\?\.due_date \|\| ""/);
   assert.doesNotMatch(avanzar, /agregarTarea\(/);
   // Y terminarlo ya no pregunta nada ni abre otro: el «¿Qué sigue?» de antes no está.
   assert.doesNotMatch(lista, /loQueSigue|preguntarQueSigue|sumarLoQueSigue|className="que-sigue"|setSigue\(|Nada más/);

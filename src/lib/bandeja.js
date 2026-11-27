@@ -124,7 +124,8 @@ export const alDescartar = (quienNombre, ahora = new Date()) =>
   ({ status: "listo", descartada: true, hecha_at: ahora.toISOString(), hecha_por: quienNombre || null });
 
 /** Se vuelve a abrir: ni hecha ni descartada. */
-export const alReabrir = () => ({ status: "en-progreso", descartada: false, hecha_at: null, hecha_por: null });
+// Vuelve en curso: si estaba en espera antes de terminarla, ya no.
+export const alReabrir = () => ({ status: "en-progreso", descartada: false, hecha_at: null, hecha_por: null, espera: false });
 
 /**
  * La tarea que se agrega escribiendo y Enter: mía, con su proyecto si lo

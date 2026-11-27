@@ -27,7 +27,9 @@ const esDeCompras = t => !!t?.compra_id || t?.type === "Compra";
 const abierta = t => t?.status !== "listo";
 
 function proximoPaso(tareas = []) {
-  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t));
+  // Lo que está en espera no es el próximo paso, y su fecha no vence mientras
+  // espera: FOGA en stand-by con un día ya pasado ponía al proyecto «Vencido».
+  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t) && !t.espera);
   const conFecha = abiertas.filter(t => t.due_date)
     .sort((a, b) => soloDia(a.due_date).localeCompare(soloDia(b.due_date)) || Number(a.id) - Number(b.id));
   if (conFecha.length) return conFecha[0];

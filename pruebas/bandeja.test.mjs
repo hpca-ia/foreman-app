@@ -120,7 +120,8 @@ test("lo vencido se resuelve de un toque: nueva fecha, delegar, o ya no va", () 
   const tarea = t({ title: "Presupuesto corregido", due_date: "2026-10-23" });
   assert.equal(bandeja({ tareas: [{ ...tarea, ...d }], usuarioId: YO, hoy: HOY }).cuenta.meToca, 0);
   // Y se puede volver a abrir.
-  assert.deepEqual(alReabrir(), { status: "en-progreso", descartada: false, hecha_at: null, hecha_por: null });
+  // Vuelve en curso, aunque antes de terminarla haya estado en espera.
+  assert.deepEqual(alReabrir(), { status: "en-progreso", descartada: false, hecha_at: null, hecha_por: null, espera: false });
 });
 
 test("se agrega escribiendo y Enter: es mía, con su proyecto si lo elegí al lado", () => {

@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef } from "react";
 import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight, Paperclip, ThumbsUp, MessageSquareWarning } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -232,16 +232,23 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // AVANZÓ: se anota en el MISMO punto qué pasó o qué sigue —con su fecha, si
   // se dijo—, y si estaba en espera deja de estarlo.
   // @returns null, o lo que falta
-  async function avanzar(item, { texto, due_date, alCliente }) {
-    const r = alAvanzar({ item, texto, due_date });
+  async function avanzar(item, { texto, due_date, alCliente, vence }) {
+    const r = alAvanzar({ item, texto, due_date, vence, hoy: hoyISO() });
     if (r.error) return r.error;
     let dijo = null;
     await hacer(async () => {
       const aviso = await anotarEnLaTarea(item, r.nota, currentUser, { alCliente: !!alCliente && compartidas.has(item.id) && !historial.sinNotasAlCliente });
-      // «Quedó anotado, pero…» es un aviso, no un error: se anotó.
+      // No se anotó: el texto queda en el cuadro para volver a intentar.
       if (aviso && !/^Quedó anotado/.test(aviso)) { dijo = aviso; return; }
-      if (r.fecha) { const e = await ponerFecha(item, r.fecha, currentUser); if (e) dijo = e; }
-      if (r.sacarDeEspera) await marcarEspera(item, false, currentUser);
+      // Desde acá ya quedó anotado: lo que falle se dice abajo de la lista y el
+      // cuadro se cierra igual, para no anotarlo dos veces al reintentar.
+      const despues = [aviso];
+      // El día nuevo es de un paso nuevo: la hora del de antes (una reunión a
+      // las 10) no pasa al día nuevo. Se pone en «Para cuándo» si hace falta.
+      if (r.fecha !== undefined) despues.push(await ponerFecha(item, r.fecha, currentUser, null));
+      if (r.sacarDeEspera) despues.push(await marcarEspera(item, false, currentUser));
+      const problemas = despues.filter(Boolean);
+      if (problemas.length) setError(problemas.join(" "));
     });
     return dijo;
   }
@@ -1012,6 +1019,8 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   // EL ✓ PREGUNTA QUÉ PASÓ: null · "elegir" (los tres botones) · "avanzo" (se escribe qué sigue).
   const [pregunta, setPregunta] = useState(null);
   const [paso, setPaso] = useState({ texto: "", dia: "", alCliente: true, falta: "" });
+  // Un Enter doble mandaba dos veces la misma anotación.
+  const enviando = useRef(false);
   // Lo que se toca poco, plegado: lo del cliente, y etapa / responsable / quitar.
   const [verCliente, setVerCliente] = useState(false);
   const [mas, setMas] = useState(false);
@@ -1067,9 +1076,13 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   const est = estadoDeActividad(item, tarea, hoy);
   const vencida = est.clase === "vencida";
   const guardarPaso = async () => {
-    const falta = await onAvanzar?.({ texto: paso.texto, due_date: paso.dia, alCliente: paso.alCliente && puedeLeerlo });
-    if (falta) { setPaso(p => ({ ...p, falta })); return; }
-    setPregunta(null); setPaso({ texto: "", dia: "", alCliente: true, falta: "" });
+    if (enviando.current) return;
+    enviando.current = true;
+    try {
+      const falta = await onAvanzar?.({ texto: paso.texto, due_date: paso.dia, alCliente: paso.alCliente && puedeLeerlo, vence: tarea?.due_date || "" });
+      if (falta) { setPaso(p => ({ ...p, falta })); return; }
+      setPregunta(null); setPaso({ texto: "", dia: "", alCliente: true, falta: "" });
+    } finally { enviando.current = false; }
   };
   // LO QUE DISTINGUE A ESTE PUNTO DE LOS DEMÁS, y nada más: qué es si no es una
   // gestión, de quién, y del cliente solo cuando hay algo que decir.

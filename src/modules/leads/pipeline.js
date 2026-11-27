@@ -8,11 +8,10 @@
 //      paralelo ni «estamos acá»: es un dato del lead, no una fila por etapa.
 //   2. Mientras se persigue está en el pipeline. Cuando se aprueba sale —vive
 //      en Control—, y si se pierde se cierra con su motivo.
-//   3. Siempre tiene una fecha en la que alguien lo vuelve a mirar: o nos toca
-//      a nosotros (su próximo paso, que es una tarea suya con fecha) o le toca
-//      al cliente (está esperando su respuesta, con el día en que FOREMAN lo
-//      recuerda). El que no tiene ninguna de las dos es el que se pierde sin
-//      que nadie lo decida, y se marca.
+//   3. Está EN CURSO o EN ESPERA, igual que cada una de sus actividades, y
+//      avisa solo por dos cosas: venció algo que tenía fecha, o llegó el día
+//      que se pidió para revisar uno en espera (ver estadoDelLead). Sin fecha
+//      no está en falta: desde el 26/11/2026 eso ya no se marca.
 //
 // Acá no se lee ni se escribe la base: se decide. Lo que se guarda lo guarda
 // quien llama, con los campos que esto devuelve.
@@ -155,14 +154,16 @@ const esDeCompras = t => !!t?.compra_id || t?.type === "Compra";
 const abierta = t => t?.status !== "listo";
 
 /**
- * El próximo paso de un lead: su tarea abierta más próxima.
+ * El próximo paso de un lead: su tarea abierta más próxima, de las que no esperan.
  *
  * Manda la fecha. Si ninguna tiene, la primera que se escribió: sirve para
  * decir cuál es, pero no cuenta como «alguien lo vuelve a mirar» porque no
  * dice cuándo.
  */
 export function proximoPaso(tareas = []) {
-  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t));
+  // Lo que está en espera no es el próximo paso, y su fecha no vence mientras
+  // espera: FOGA en stand-by con un día ya pasado ponía al proyecto «Vencido».
+  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t) && !t.espera);
   const conFecha = abiertas.filter(t => t.due_date)
     .sort((a, b) => soloDia(a.due_date).localeCompare(soloDia(b.due_date)) || Number(a.id) - Number(b.id));
   if (conFecha.length) return conFecha[0];

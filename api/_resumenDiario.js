@@ -74,12 +74,12 @@ async function ordenesSinFirmar() {
 }
 
 /**
- * EL PIPELINE: A QUIÉN HAY QUE INSISTIRLE, Y QUÉ LEAD SE QUEDÓ SIN PASO.
+ * EL PIPELINE: LOS DOS AVISOS.
  *
- * Un lead que espera al cliente no tiene nada que hacer hasta el día en que se
- * dijo «recordámelo». Ese día sale acá, con hace cuánto espera. Y el que no
- * tiene próximo paso ni espera sale también, porque es el que se pierde sin
- * que nadie lo decida. Es la misma lista del panel de Avisos del tablero.
+ * Un proyecto en espera no tiene nada que hacer hasta el día en que se pidió
+ * «recordámelo»: ese día sale acá, con hace cuánto espera. Y el que tiene algo
+ * con fecha ya vencida. Sin fecha no es una falta y no sale (26/11/2026). Es
+ * la misma lista del panel de Avisos del tablero.
  */
 const bloqueDelPipeline = lista => (lista.length ? `
   <div style="font-size:11px;font-weight:700;color:#0F3D3E;letter-spacing:.4px;margin:20px 0 6px">

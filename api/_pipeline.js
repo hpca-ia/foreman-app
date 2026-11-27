@@ -72,7 +72,8 @@ export async function datosDelProyecto(leadId) {
     responsable: usuarios.find(u => u.id === lead.responsable_id) || null,
     pendientes: pasos.filter(p => p.status !== "listo"),
     hechas: pasos.filter(p => p.status === "listo"),
-    // Si la pelota está del lado del cliente, se dice: es la mitad de «en qué va».
+    // Si está en espera se dice: es la mitad de «en qué va». Desde el 26/11/2026
+    // en espera no es solo el cliente: también un proveedor, o «más adelante».
     espera: lead.espera_desde && !lead.resultado
       ? { desde: String(lead.espera_desde).slice(0, 10), que: lead.espera_que || null } : null,
   };
@@ -90,10 +91,11 @@ export function destinatarios(d, a) {
 }
 
 /** El resumen en texto plano, por si NOVA no contesta: nunca se queda sin informe. */
-export function resumenPlano(d) {
+export function resumenPlano(d, { paraCliente = false } = {}) {
   const lineas = [];
   lineas.push(`Etapa: ${d.etapa}.`);
-  if (d.espera) lineas.push(`Esperando respuesta del cliente desde el ${d.espera.desde}${d.espera.que ? `: ${d.espera.que}` : ""}.`);
+  // Qué se espera es una nota nuestra: al de afuera se le dice solo desde cuándo.
+  if (d.espera) lineas.push(`En espera desde el ${d.espera.desde}${d.espera.que && !paraCliente ? `: ${d.espera.que}` : ""}.`);
   if (d.hechas.length) lineas.push(`Hecho hasta ahora: ${d.hechas.length} ${d.hechas.length === 1 ? "tarea" : "tareas"}.`);
   const pasos = d.pendientes.slice(0, 6);
   if (pasos.length) lineas.push("Lo que sigue:");
@@ -107,13 +109,13 @@ export function resumenPlano(d) {
  * se manda el resumen plano: un informe que no sale no sirve de nada.
  */
 export async function informeDeNova(d, { motivo, paraCliente }) {
-  if (!process.env.ANTHROPIC_API_KEY) return resumenPlano(d);
+  if (!process.env.ANTHROPIC_API_KEY) return resumenPlano(d, { paraCliente });
   const contexto = {
     proyecto: d.lead.nombre,
     cliente: d.lead.contacto || null,
     etapa_actual: d.etapa,
     responsable: d.responsable?.nombre || d.lead.responsable_nombre || null,
-    esperando_al_cliente: d.espera,
+    en_espera: d.espera ? { desde: d.espera.desde, ...(paraCliente ? {} : { que: d.espera.que }) } : null,
     pasos_pendientes: d.pendientes.map(p => ({ paso: p.title, para: p.due_date })),
     pasos_hechos: d.hechas.slice(-8).map(p => ({ paso: p.title, cuando: p.due_date })),
     ultimos_movimientos: d.movs.slice(0, 8).map(m => ({ que: m.detalle, cuando: (m.created_at || "").slice(0, 10) })),
@@ -133,8 +135,8 @@ Máximo 180 palabras. No inventes nada que no esté en los datos; si algo no est
     });
     const datos = await r.json();
     const texto = textoDeNova(datos)?.trim();
-    return texto || resumenPlano(d);
+    return texto || resumenPlano(d, { paraCliente });
   } catch {
-    return resumenPlano(d);
+    return resumenPlano(d, { paraCliente });
   }
 }
