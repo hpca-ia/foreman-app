@@ -1,29 +1,42 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { inputStyle } from "../components/ui/Input";
 import Button from "../components/ui/Button";
-import { queEsLaCarpeta, quePedir, armarIndice, indiceEnCsv, CON_SUBCARPETAS } from "../lib/carpetasDeArchivos.js";
+import { abrirArchivo } from "../lib/archivos";
+import { queEsLaCarpeta, quePedir, armarIndice, indiceEnCsv, porProyecto, detalleDe, nombreLegible, CON_SUBCARPETAS } from "../lib/carpetasDeArchivos.js";
 
-// Las carpetas del depósito, cada una con su nombre.
+// Todos los archivos de FOREMAN, por proyecto.
 //
-// Los archivos se guardan por número (`obra-12/`), y en Supabase o en el
-// respaldo de Dropbox solo se ve eso. Acá se lee qué carpetas hay de verdad y
-// a qué ficha corresponde cada una. La lista se descarga en CSV para tenerla
-// a mano sin FOREMAN.
+// En el depósito se guardan por número (`obra-12/`), y en Supabase solo se ve
+// eso. Acá cada proyecto muestra sus grupos —facturas, compras, actas…— y cada
+// archivo se abre. Es el mismo orden que el respaldo deja en Dropbox, en
+// /FOREMAN/respaldos/por-proyecto.
 
 const BUCKET = "task-files";
 const LOTE = 1000;
 
-/** Los nombres de lo que hay dentro de una carpeta del depósito, solo carpetas. */
-async function subcarpetas(prefijo) {
-  const nombres = [];
+/** Lo que hay en una carpeta del depósito: { carpetas: [], archivos: [{ ruta, nombre }] }. */
+async function contenido(prefijo) {
+  const carpetas = [], archivos = [];
   for (let desde = 0; ; desde += LOTE) {
     const { data, error } = await supabase.storage.from(BUCKET).list(prefijo, { limit: LOTE, offset: desde, sortBy: { column: "name", order: "asc" } });
     if (error) throw new Error(error.message);
     // Las carpetas vienen sin id; los archivos, con.
-    (data || []).filter(d => !d.id).forEach(d => nombres.push(d.name));
-    if (!data || data.length < LOTE) return nombres;
+    for (const d of data || []) {
+      if (d.name === ".emptyFolderPlaceholder") continue;
+      if (d.id) archivos.push({ ruta: prefijo ? `${prefijo}/${d.name}` : d.name, nombre: d.name });
+      else carpetas.push(d.name);
+    }
+    if (!data || data.length < LOTE) return { carpetas, archivos };
   }
+}
+
+/** Todos los archivos de una carpeta, entrando en sus subcarpetas. */
+async function archivosDe(prefijo) {
+  const { carpetas, archivos } = await contenido(prefijo);
+  for (const c of carpetas) archivos.push(...await archivosDe(`${prefijo}/${c}`));
+  return archivos;
 }
 
 async function leer(tabla, columnas, ids) {
@@ -37,10 +50,10 @@ async function leer(tabla, columnas, ids) {
 }
 
 async function cargarIndice() {
-  const arriba = await subcarpetas("");
+  const arriba = (await contenido("")).carpetas;
   const rutas = [];
   for (const n of arriba) {
-    if (CON_SUBCARPETAS.includes(n)) (await subcarpetas(n)).forEach(s => rutas.push(`${n}/${s}`));
+    if (CON_SUBCARPETAS.includes(n)) (await contenido(n)).carpetas.forEach(s => rutas.push(`${n}/${s}`));
     else rutas.push(n);
   }
   const carpetas = rutas.map(queEsLaCarpeta);
@@ -61,6 +74,69 @@ async function cargarIndice() {
   return armarIndice(carpetas, filas);
 }
 
+/** Una carpeta (la compra, el acta, el día…): al abrirla, sus archivos. */
+function Carpeta({ i }) {
+  const titulo = detalleDe(i);
+  // Sin subtítulo (las facturas de la obra que es el proyecto, los archivos
+  // del proyecto) los archivos van directo bajo el grupo, ya abiertos.
+  const [abierta, setAbierta] = useState(!titulo);
+  const [archivos, setArchivos] = useState(null);
+  const [error, setError] = useState("");
+
+  const cargar = useCallback(async () => {
+    try { setArchivos(await archivosDe(i.carpeta)); } catch (e) { setError(e.message); }
+  }, [i.carpeta]);
+  useEffect(() => { if (!titulo) cargar(); }, [titulo, cargar]);
+
+  function alternar() {
+    setAbierta(!abierta);
+    if (!abierta && !archivos) cargar();
+  }
+
+  const lista = (
+    <div style={{ paddingLeft: titulo ? 18 : 0 }}>
+      {error && <div style={{ fontSize: 12, color: "var(--danger)" }}>No se pudo leer: {error}</div>}
+      {!archivos && !error && <div style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>Leyendo…</div>}
+      {archivos?.length === 0 && <div style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>Vacía</div>}
+      {archivos?.map(a => (
+        <button key={a.ruta} onClick={() => abrirArchivo(a.ruta, { nombre: a.nombre })}
+          style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: "3px 0", fontSize: 12, color: "var(--brand)", cursor: "pointer", fontFamily: "var(--font)" }}>
+          {nombreLegible(a.ruta.split("/").pop())}
+          {a.ruta.split("/").length > i.carpeta.split("/").length + 1 && <span style={{ color: "var(--ink-soft)" }}> · {a.ruta.slice(i.carpeta.length + 1).split("/").slice(0, -1).join("/")}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (!titulo) return lista;
+  return (
+    <div>
+      <button onClick={alternar} style={fila}>
+        {abierta ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>{titulo}</span>
+        <span style={{ color: "var(--ink-soft)", fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{i.carpeta}</span>
+      </button>
+      {abierta && lista}
+    </div>
+  );
+}
+
+const fila = { display: "flex", alignItems: "center", gap: 6, width: "100%", textAlign: "left", background: "none", border: "none", padding: "4px 0", fontSize: 12, color: "var(--ink)", cursor: "pointer", fontFamily: "var(--font)" };
+
+function Desplegable({ titulo, cuenta, fuerte, children, abiertoAlInicio = false }) {
+  const [abierto, setAbierto] = useState(abiertoAlInicio);
+  return (
+    <div>
+      <button onClick={() => setAbierto(!abierto)} style={{ ...fila, fontWeight: fuerte ? 700 : 600, fontSize: fuerte ? 13 : 12, padding: fuerte ? "8px 0" : "4px 0" }}>
+        {abierto ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        <span>{titulo}</span>
+        {cuenta != null && <span style={{ color: "var(--ink-soft)", fontWeight: 400 }}>({cuenta})</span>}
+      </button>
+      {abierto && <div style={{ paddingLeft: 18 }}>{children}</div>}
+    </div>
+  );
+}
+
 export default function CarpetasDeArchivos() {
   const [indice, setIndice] = useState(null);
   const [error, setError] = useState("");
@@ -72,11 +148,11 @@ export default function CarpetasDeArchivos() {
     return () => { vivo = false; };
   }, []);
 
-  const visibles = useMemo(() => {
+  const proyectos = useMemo(() => {
     if (!indice) return [];
     const q = buscar.trim().toLowerCase();
-    if (!q) return indice;
-    return indice.filter(i => [i.carpeta, i.que, i.nombre, i.proyecto, i.obra].some(v => String(v || "").toLowerCase().includes(q)));
+    const filtrado = !q ? indice : indice.filter(i => [i.carpeta, i.grupo, i.nombre, i.proyecto, i.obra].some(v => String(v || "").toLowerCase().includes(q)));
+    return porProyecto(filtrado);
   }, [indice, buscar]);
 
   function descargar() {
@@ -89,43 +165,36 @@ export default function CarpetasDeArchivos() {
   }
 
   const caja = { background: "#fff", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "14px 16px", marginBottom: 10 };
-  const th = { textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--ink-soft)", padding: "6px 8px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
-  const td = { fontSize: 12, color: "var(--ink)", padding: "6px 8px", borderBottom: "1px solid var(--border)", verticalAlign: "top" };
 
   return (
     <div>
       <div style={caja}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>Carpetas de archivos</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>Archivos por proyecto</div>
         <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.5 }}>
-          En Supabase (Storage → task-files) y en el respaldo de Dropbox (/FOREMAN/respaldos/archivos/task-files) las carpetas
-          llevan el número de la ficha, no su nombre. Acá está cada carpeta con lo que es. Descarga la lista para tenerla sin FOREMAN.
+          Todos los archivos de FOREMAN, por proyecto. El respaldo los deja en el mismo orden en Dropbox
+          (/FOREMAN/respaldos/por-proyecto). En Supabase las carpetas llevan el número de la ficha: al lado de cada una va ese número.
         </div>
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar obra, proyecto o carpeta…" style={{ ...inputStyle, maxWidth: 320 }} />
+          <input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar proyecto, compra, acta…" style={{ ...inputStyle, maxWidth: 320 }} />
           <Button size="sm" variant="secondary" onClick={descargar} disabled={!indice?.length}>Descargar lista (Excel)</Button>
-          {indice && <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>{visibles.length} de {indice.length} carpetas</span>}
         </div>
       </div>
 
       {error && <div style={{ ...caja, borderColor: "var(--danger)", color: "var(--danger)", fontSize: 13 }}>No se pudo leer: {error}</div>}
       {!indice && !error && <div style={{ fontSize: 12, color: "var(--ink-soft)", padding: 8 }}>Leyendo las carpetas…</div>}
+      {indice && !proyectos.length && <div style={{ fontSize: 12, color: "var(--ink-soft)", padding: 8 }}>Nada con «{buscar}».</div>}
 
-      {indice && (
-        <div style={{ ...caja, padding: 0, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr><th style={th}>Carpeta</th><th style={th}>Qué es</th><th style={th}>Nombre</th><th style={th}>Proyecto</th><th style={th}>Obra</th></tr></thead>
-            <tbody>
-              {visibles.map(i => (
-                <tr key={i.carpeta}>
-                  <td style={{ ...td, fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{i.carpeta}</td>
-                  <td style={{ ...td, color: "var(--ink-soft)", whiteSpace: "nowrap" }}>{i.que}</td>
-                  <td style={td}>{i.borrada ? <span style={{ color: "var(--warning)" }}>Ya no existe en FOREMAN</span> : i.nombre}</td>
-                  <td style={td}>{i.proyecto}</td>
-                  <td style={td}>{i.obra}</td>
-                </tr>
+      {indice && proyectos.length > 0 && (
+        <div style={{ ...caja, padding: "6px 16px" }}>
+          {proyectos.map(p => (
+            <Desplegable key={p.proyecto} titulo={p.proyecto} fuerte abiertoAlInicio={proyectos.length === 1}>
+              {p.grupos.map(g => (
+                <Desplegable key={g.grupo} titulo={g.grupo} cuenta={g.carpetas.filter(detalleDe).length || null}>
+                  {g.carpetas.map(i => <Carpeta key={i.carpeta} i={i} />)}
+                </Desplegable>
               ))}
-            </tbody>
-          </table>
+            </Desplegable>
+          ))}
         </div>
       )}
     </div>

@@ -16,7 +16,8 @@
 
 import { rest } from "./_supabase.js";
 import { respaldoDeLaBase, listarDepositos, listarArchivos, bajarArchivo, borrarArchivo } from "./_respaldo.js";
-import { configuradoDropbox, subir, listar, borrar } from "./_dropbox.js";
+import { configuradoDropbox, subir, listar, borrar, copiarVarios } from "./_dropbox.js";
+import { queEsLaCarpeta, quePedir, armarIndice, carpetaDeLaRuta, destinoLegible, indiceEnCsv } from "./_carpetasDeArchivos.js";
 import { enviarCorreo, plantilla, esc } from "./_correo.js";
 
 const CARPETA = "/FOREMAN/respaldos";
@@ -44,6 +45,67 @@ function sobran(rutas) {
     const f = ruta.match(/foreman-base-(\d{4}-\d{2})-(\d{2})\.json\.gz$/);
     return f && f[2] !== "01" && `${f[1]}-${f[2]}` < limite;
   });
+}
+
+const POR_PROYECTO = `${CARPETA}/por-proyecto`;
+const ESPEJO = `${CARPETA}/archivos/task-files`;
+const TOPE_COPIAS = 1000;                 // lo que Dropbox acepta de una vez
+
+async function leerFilas(tabla, columnas, ids) {
+  const filas = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const r = await rest(`${tabla}?select=${columnas}&id=in.(${ids.slice(i, i + 150).join(",")})`);
+    if (!r.ok) throw new Error(`${tabla}: ${r.status}`);
+    filas.push(...await r.json());
+  }
+  return filas;
+}
+
+/**
+ * Pone en por-proyecto lo que esté en la copia exacta y todavía no esté ahí.
+ * Deja además el índice (carpeta → proyecto) en un CSV, para Excel.
+ * @returns cuántos archivos se mandaron a copiar
+ */
+export async function ordenarPorProyecto() {
+  const espejo = await listar(ESPEJO, { nombres: true });   // minúsculas → como se escribió
+  const rutas = [...espejo.values()].map(p => p.slice(ESPEJO.length + 1));
+  const carpetas = [...new Set(rutas.map(carpetaDeLaRuta))].map(queEsLaCarpeta);
+
+  const filas = {};
+  for (const [tabla, p] of Object.entries(quePedir(carpetas))) filas[tabla] = await leerFilas(tabla, p.columnas, p.ids);
+  const faltan = (tabla, campo) => {
+    const ya = new Set((filas[tabla] || []).map(f => Number(f.id)));
+    return [...new Set(Object.values(filas).flat().map(f => Number(f[campo])).filter(id => id && !ya.has(id)))];
+  };
+  const obras = faltan("obras", "obra_id");
+  if (obras.length) filas.obras = [...(filas.obras || []), ...await leerFilas("obras", "id,nombre,lead_id", obras)];
+  const leads = faltan("leads", "lead_id");
+  if (leads.length) filas.leads = [...(filas.leads || []), ...await leerFilas("leads", "id,nombre", leads)];
+
+  const indice = armarIndice(carpetas, filas);
+  const deLaCarpeta = new Map(indice.map(i => [i.carpeta, i]));
+  await subir(`${POR_PROYECTO}/indice-de-carpetas.csv`, Buffer.from(indiceEnCsv(indice), "utf8"));
+
+  // Si dos archivos caerían en el mismo nombre, el segundo lleva el nombre
+  // con que se guardó, que no se repite. Se decide sobre todos, en orden, para
+  // que cada noche salga lo mismo.
+  const usados = new Set();
+  const destinos = rutas.sort().map(ruta => {
+    let hacia = `${POR_PROYECTO}/${destinoLegible(deLaCarpeta.get(carpetaDeLaRuta(ruta)), ruta)}`;
+    if (usados.has(hacia.toLowerCase())) hacia = `${hacia.slice(0, hacia.lastIndexOf("/"))}/${ruta.split("/").pop()}`;
+    usados.add(hacia.toLowerCase());
+    return [ruta, hacia];
+  });
+
+  const yaEstan = await listar(POR_PROYECTO);
+  const pares = [];
+  for (const [ruta, hacia] of destinos) {
+    if (yaEstan.has(hacia.toLowerCase())) continue;
+    pares.push({ desde: `${ESPEJO}/${ruta}`, hacia });
+    if (pares.length >= TOPE_COPIAS) break;
+  }
+  await copiarVarios(pares);
+  return pares.length;
 }
 
 /**
@@ -93,6 +155,23 @@ export async function correrRespaldo({ archivos = true, correo = "auto" } = {}) 
     }
   } else {
     problemas.push("Dropbox no está configurado: el respaldo va solo por correo.");
+  }
+
+  // ── Los mismos archivos, por proyecto ──
+  //
+  // La copia de arriba es idéntica al depósito, con carpetas por número
+  // (`obra-12/`): es la que sirve para levantar FOREMAN de nuevo. Esta otra es
+  // para buscar a mano: `Diners Plaza Lagos/Facturas/2026-11-26 … factura.pdf`.
+  // Se copia dentro de Dropbox desde la de arriba, sin bajar nada de Supabase,
+  // así que alcanza también a los archivos que ya se soltaron del depósito.
+  let ordenados = 0;
+  if (hayDropbox && archivos) {
+    try {
+      ordenados = await ordenarPorProyecto();
+      paso.push(ordenados ? `Por proyecto: ${ordenados} archivos puestos en ${CARPETA}/por-proyecto` : "Por proyecto: al día");
+    } catch (e) {
+      problemas.push(`Al ordenar por proyecto: ${e.message}`);
+    }
   }
 
   // ── Soltar del depósito lo viejo que ya está respaldado ──
@@ -155,7 +234,7 @@ export async function correrRespaldo({ archivos = true, correo = "auto" } = {}) 
     ok: problemas.length === 0,
     segundos: Math.round((Date.now() - inicio) / 1000),
     base: { archivo: base.nombre, ...base.resumen },
-    dropbox: hayDropbox ? { carpeta: CARPETA, archivosCopiados: subidos, archivosPendientes: faltan, copiasViejasBorradas: borrados, archivosSoltados: soltados } : "sin configurar",
+    dropbox: hayDropbox ? { carpeta: CARPETA, archivosCopiados: subidos, archivosPendientes: faltan, porProyecto: ordenados, copiasViejasBorradas: borrados, archivosSoltados: soltados } : "sin configurar",
     correo: aviso,
     paso,
     problemas,

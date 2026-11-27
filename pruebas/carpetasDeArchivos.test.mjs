@@ -56,3 +56,52 @@ test("el CSV se abre en Excel en español: punto y coma, tildes y comillas", () 
   assert.ok(csv.startsWith("﻿Carpeta;Qué es;Id"));
   assert.ok(csv.includes('"Casa ""A""; B"'));
 });
+
+// ── Por proyecto ──
+import { carpetaDeLaRuta, porProyecto, nombreLegible, destinoLegible } from "../src/lib/carpetasDeArchivos.js";
+
+const FILAS = {
+  obras: [{ id: 1, nombre: "Aeropuerto", lead_id: 9 }],
+  leads: [{ id: 9, nombre: "Diners Plaza Lagos" }],
+  compras_solicitudes: [{ id: 50, descripcion: "Cemento", lead_id: 9, obra_id: 1 }],
+};
+const INDICE = armarIndice(["obra-1", "obras/1", "compra-50", "proyecto-9", "empresa", "obra-77"].map(queEsLaCarpeta), FILAS);
+const de = c => INDICE.find(i => i.carpeta === c);
+
+test("la carpeta de un archivo, en las dos formas", () => {
+  assert.equal(carpetaDeLaRuta("obra-1/123-x.pdf"), "obra-1");
+  assert.equal(carpetaDeLaRuta("obras/1/presupuesto-original-1.xlsx"), "obras/1");
+  assert.equal(carpetaDeLaRuta("proyecto-9/cliente/1-a.pdf"), "proyecto-9");
+});
+
+test("por proyecto: el proyecto con sus grupos, y lo suelto al final", () => {
+  const p = porProyecto(INDICE);
+  assert.deepEqual(p.map(x => x.proyecto), ["Diners Plaza Lagos", "Empresa", "Fichas borradas"]);
+  assert.deepEqual(p[0].grupos.map(g => g.grupo), ["Archivos del proyecto", "Compras", "Facturas", "Presupuesto original de la obra"]);
+});
+
+test("el nombre del archivo se lee con fecha y hora de Ecuador", () => {
+  // 1764186000000 = 2025-11-26 19:40:00 UTC = 14:40 en Ecuador
+  assert.equal(nombreLegible("1764186000000-factura_ferreteria.pdf"), "2025-11-26 14.40.00 factura_ferreteria.pdf");
+  assert.equal(nombreLegible("1764186000000-2-foto.jpg"), "2025-11-26 14.40.00 (2) foto.jpg");
+  assert.equal(nombreLegible("visto-123.pdf"), "visto-123.pdf");
+});
+
+test("dónde va cada archivo en el respaldo por proyecto", () => {
+  assert.equal(destinoLegible(de("obra-1"), "obra-1/1764186000000-f.pdf"), "Diners Plaza Lagos/Facturas/Aeropuerto/2025-11-26 14.40.00 f.pdf");
+  assert.equal(destinoLegible(de("compra-50"), "compra-50/1764186000000-p.pdf"), "Diners Plaza Lagos/Compras/Compra 50 · Cemento/2025-11-26 14.40.00 p.pdf");
+  assert.equal(destinoLegible(de("proyecto-9"), "proyecto-9/cliente/1764186000000-a.pdf"), "Diners Plaza Lagos/Archivos del proyecto/cliente/2025-11-26 14.40.00 a.pdf");
+  assert.equal(destinoLegible(de("obra-77"), "obra-77/x.pdf"), "Fichas borradas/Facturas/obra-77/x.pdf");
+});
+
+test("lo que Dropbox no acepta en un nombre se cambia por un guion", () => {
+  const [i] = armarIndice([queEsLaCarpeta("proyecto-9")], { leads: [{ id: 9, nombre: 'Casa A/B: "lote" 3.' }] });
+  assert.equal(destinoLegible(i, "proyecto-9/x.pdf"), "Casa A-B- -lote- 3/Archivos del proyecto/x.pdf");
+});
+
+test("el servidor usa la misma regla: api/_carpetasDeArchivos.js es copia de la de la app", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const app = await readFile(new URL("../src/lib/carpetasDeArchivos.js", import.meta.url), "utf8");
+  const servidor = await readFile(new URL("../api/_carpetasDeArchivos.js", import.meta.url), "utf8");
+  assert.ok(servidor.endsWith(app), "Cambiaste una y no la otra: copia src/lib/carpetasDeArchivos.js debajo del encabezado de api/_carpetasDeArchivos.js");
+});
