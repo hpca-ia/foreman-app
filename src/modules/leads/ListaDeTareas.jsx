@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { Check, Plus, X, ListTodo, Hourglass, Mail, ChevronDown, ChevronUp, ChevronRight, Eye, EyeOff, ClipboardList, Send, History, RotateCcw, CornerDownRight, Paperclip, ThumbsUp, MessageSquareWarning } from "lucide-react";
 import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
@@ -8,7 +8,7 @@ import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
   anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente, pedirAprobacion, ponerPlazoDeAprobacion,
 } from "./proyecto";
-import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, loQueSigue } from "./tareasDelProyecto";
+import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, estadoDeActividad, alAvanzar } from "./tareasDelProyecto";
 import { gentePara } from "../controlObra/ordenesDeCambio";
 import { deAfuera } from "../controlObra/directorioDelProyecto.js";
 import { ultimaAnotacion } from "./historialDeTarea";
@@ -60,10 +60,22 @@ import { plazoDe } from "./aprobaciones.js";
 // lo que lee el cliente, ¿ya está?—, cada una dice qué pasa al tocarla, y hay
 // «Cerrar» arriba y abajo y una flecha en cada fila.
 //
-// Y LA CONTINUIDAD: agendar la reunión es ponerle día y hora AL MISMO punto;
-// y cuando el punto se termina se pregunta qué sigue, y lo que se escriba
-// nace de él —misma etapa, misma persona— con el historial de los dos
-// diciendo que uno sigue del otro (loQueSigue).
+// UN PUNTO ES UN TEMA QUE AVANZA: NO SE CIERRA PARA PASAR AL PASO SIGUIENTE.
+// Hernán, 26/11/2026: «ya tengo la actividad FOGA, ¿el check quiere decir
+// completada? En efecto se completó pero quiero que quede en stand-by hasta
+// tener nuevo paso... ¿se cierra y se abre nueva?». Se cerraba y se abría
+// otra, con otro nombre y sin historial (ver tareasDelProyecto.js). Ahora el ✓
+// pregunta en la misma fila —«¿Qué pasó con FOGA?»— y ofrece tres botones con
+// palabras: AVANZÓ (se anota en el mismo punto qué sigue), QUEDA EN ESPERA
+// (sigue en la lista, al fondo) y TERMINADA (recién ahí va a «hechos»).
+//
+// Y LA FILA DICE EN QUÉ ESTÁ, CON PALABRAS: en curso, en espera, para el 30
+// nov, venció. Se fue lo que se repetía en todas —«gestión», «la ve el
+// cliente», «sin fecha» en rojo—: de dieciséis puntos abiertos, catorce eran
+// gestión y once no tenían fecha. Queda lo que distingue a una de otra.
+//
+// EL PUNTO ABIERTO, CORTO: qué pasó, para cuándo, y su estado. Lo del cliente
+// y lo que se toca poco están a un toque, plegados.
 //
 // LO QUE VE EL CLIENTE DE CADA PUNTO. Hernán, 17/11/2026, mirando RES BG: «el
 // cliente no ve el modelado en Revit... no sé por qué. Cliente debe ver las
@@ -149,10 +161,6 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // La tarea abierta: al tocarla cuenta qué se hizo, quién y cuándo, y ofrece
   // lo que se puede hacer con ella, con botones que dicen su nombre.
   const [abierta, setAbierta] = useState(null);
-  // LO QUE SIGUE: al terminar un punto se pregunta qué viene después.
-  //   { de, texto, due_date, hora, alCliente, loVeia, error }  mientras se escribe
-  //   { de, nuevo }                                            cuando ya se agregó
-  const [sigue, setSigue] = useState(null);
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una tarea puede ser de ellos aunque no entren a FOREMAN.
   //
@@ -214,36 +222,28 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     try { await fn(); await cargar(); onBitacora?.(); } finally { setOcupado(false); }
   }
 
-  // MARCAR UN PUNTO. Al terminarlo se pregunta qué sigue; un envío ya nació
-  // cerrado y una compra tiene su módulo: a esos no se les pregunta.
-  const preguntarQueSigue = item => setSigue({ de: item, texto: "", due_date: "", hora: "", alCliente: compartidas.has(item.id), loVeia: compartidas.has(item.id), error: "" });
+  // TERMINAR UN PUNTO, o volver a abrirlo. Ya no abre otro con otro nombre.
   const marcar = (item, hecho) => hacer(async () => {
     const e = await marcarItem(item, hecho, currentUser?.name, currentUser);
-    if (e) { setError(e); return; }
-    const clase = claseDe(tareas[item.tarea_id]);
-    if (hecho && clase !== "envio" && clase !== "compra") { preguntarQueSigue(item); setAbierta(a => (a === item.id ? null : a)); }
-    else setSigue(v => (v?.de?.id === item.id ? null : v));
+    if (e) setError(e);
+    else if (hecho) setAbierta(a => (a === item.id ? null : a));
   });
 
-  // Lo que sigue nace del punto que se terminó: en su etapa y a cargo de la
-  // misma persona. Con día y hora es una reunión.
-  async function sumarLoQueSigue() {
-    const v = sigue;
-    const t = tareas[v.de.tarea_id];
-    const r = loQueSigue({ de: v.de, tarea: t, clase: claseDe(t), texto: v.texto, due_date: v.due_date, hora: v.hora });
-    if (r.error) { setSigue(x => ({ ...x, error: r.error })); return; }
+  // AVANZÓ: se anota en el MISMO punto qué pasó o qué sigue —con su fecha, si
+  // se dijo—, y si estaba en espera deja de estarlo.
+  // @returns null, o lo que falta
+  async function avanzar(item, { texto, due_date, alCliente }) {
+    const r = alAvanzar({ item, texto, due_date });
+    if (r.error) return r.error;
+    let dijo = null;
     await hacer(async () => {
-      const n = await agregarTarea({
-        lead, etapaId: r.etapaId, titulo: r.titulo, tipo: r.tipo, due_date: r.due_date, hora: r.hora,
-        assignee_id: r.assignee_id, responsable_externo: r.responsable_externo, vieneDe: r.vieneDe,
-        nombreResponsable: users.find(u => u.id === r.assignee_id)?.name,
-        orden: abiertas.length + hechas.length + 1, quien: currentUser,
-      });
-      if (n?.error) { setSigue(x => ({ ...x, error: n.error })); return; }
-      if (v.alCliente) { const e = await mostrarAlCliente(n.item, true, currentUser); if (e) setError(e); }
-      if (n.tarea?.assignee_id) await avisarPorCorreo(n.tarea.id);
-      setSigue({ de: v.de, nuevo: n.item, reunion: r.tipo === "Reunión" });
+      const aviso = await anotarEnLaTarea(item, r.nota, currentUser, { alCliente: !!alCliente && compartidas.has(item.id) && !historial.sinNotasAlCliente });
+      // «Quedó anotado, pero…» es un aviso, no un error: se anotó.
+      if (aviso && !/^Quedó anotado/.test(aviso)) { dijo = aviso; return; }
+      if (r.fecha) { const e = await ponerFecha(item, r.fecha, currentUser); if (e) dijo = e; }
+      if (r.sacarDeEspera) await marcarEspera(item, false, currentUser);
     });
+    return dijo;
   }
 
   // LO NUEVO NACE COMO LO DEMÁS. Si el cliente ya ve todo lo abierto, el punto
@@ -344,6 +344,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   }
 
   const avance = avanceDe(Object.values(tareas));
+  const enEspera = abiertas.filter(i => i.espera).length;
   const todas = [...abiertas, ...hechas];
   const vistas = todas.filter(i => compartidas.has(i.id));
   const abiertasSinMostrar = abiertas.filter(i => !compartidas.has(i.id));
@@ -381,7 +382,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     <Actividad key={item.id} item={item} etiqueta={etapaDe(item)} tarea={tareas[item.tarea_id]} users={users}
       onAgarrar={editable && etapas.length > 0 ? agarrado => { setArrastrando(agarrado ? item : null); if (!agarrado) setSobre(null); } : null}
       abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
-      onMarcar={hecho => marcar(item, hecho)} onSigue={() => preguntarQueSigue(item)}
+      onMarcar={hecho => marcar(item, hecho)} onAvanzar={datos => avanzar(item, datos)}
+      onEspera={espera => hacer(async () => { const e = await marcarEspera(item, espera, currentUser); if (e) setError(e); })}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
       laVeElCliente={compartidas.has(item.id)} onCliente={sinCompartir ? null : ver => alCliente(item, ver)}
       hayCliente={compartidas.size > 0} sinNotas={historial.sinNotasAlCliente}
@@ -412,6 +414,7 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, flex: 1 }}>
           CHECKLIST{abiertas.length ? ` · ${abiertas.length} ${abiertas.length === 1 ? "abierto" : "abiertos"}` : ""}
+          {enEspera > 0 ? ` · ${enEspera} en espera` : ""}
         </div>
         {editable && !nuevo.abierto && !pegar.abierto && (
           <>
@@ -474,9 +477,8 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             })}
           </div>
           <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
-            Cada punto es una actividad de una etapa, con su fecha y su estado, y es la misma tarea que le aparece a su responsable en Tareas.
-            {etapaId ? " La etapa con el borde marcado es en la que está el proyecto." : ""}
-            {editable && etapas.length > 0 && todasLasAbiertas > 0 ? " Para pasar un punto a otra etapa, arrastralo hasta ella." : ""}
+            {editable ? "Tocá el ✓ de un punto para decir qué pasó: avanzó, queda en espera o terminó." : "Cada punto dice en qué está."}
+            {editable && etapas.length > 0 && todasLasAbiertas > 0 ? " Para pasarlo a otra etapa, arrastralo hasta ella." : ""}
           </div>
         </div>
       )}
@@ -637,68 +639,6 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
             <button onClick={() => { setNuevo({ abierto: false }); setError(""); }} style={{ ...mini(false), padding: "4px 10px" }}>Cerrar</button>
           </div>
           {error && <div style={{ fontSize: 10.5, color: colors.danger, marginTop: 5 }}>{error}</div>}
-        </div>
-      )}
-
-      {/* ¿QUÉ SIGUE? Aparece al terminar un punto. Lo que se escriba nace de
-          él; «Nada más» lo cierra. */}
-      {editable && sigue && !sigue.nuevo && (
-        <div className="que-sigue" style={{ background: colors.successSoft, border: `1px solid ${colors.successBorder}`, borderRadius: colors.radiusMd,
-          padding: 10, marginBottom: 10, display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12.5, color: colors.ink, lineHeight: 1.4, overflowWrap: "anywhere" }}>
-            <Check size={13} color={colors.success} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            <strong>«{sigue.de.texto}»</strong> quedó hecha. <strong>¿Qué sigue?</strong>
-          </div>
-          <input value={sigue.texto} autoFocus aria-label="Lo que sigue"
-            onChange={e => setSigue(v => ({ ...v, texto: e.target.value, error: "" }))}
-            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarLoQueSigue(); } }}
-            placeholder="Lo que sigue. Ej: pedir la corrección de los planos, reunión con el cliente"
-            style={{ ...chico, width: "100%", boxSizing: "border-box" }} />
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 10.5, color: colors.muted }}>Para:</span>
-            {[["Hoy", 0], ["Mañana", 1], ["En una semana", 7]].map(([txt, n]) => {
-              const f = sumarDias(hoyISO(), n);
-              return <button key={txt} onClick={() => setSigue(v => ({ ...v, due_date: v.due_date === f ? "" : f, error: "" }))} style={mini(sigue.due_date === f)}>{txt}</button>;
-            })}
-            <input type="date" value={sigue.due_date} aria-label="Para qué día lo que sigue"
-              onChange={e => setSigue(v => ({ ...v, due_date: e.target.value, hora: e.target.value ? v.hora : "", error: "" }))}
-              style={{ ...chico, width: 128, padding: "2px 6px", fontSize: 11.5 }} />
-            <select value={sigue.hora} aria-label="A qué hora lo que sigue" disabled={!sigue.due_date} title={sigue.due_date ? "A qué hora" : "Primero el día"}
-              onChange={e => setSigue(v => ({ ...v, hora: e.target.value, error: "" }))}
-              style={{ ...chico, width: 104, padding: "2px 6px", fontSize: 11.5, opacity: sigue.due_date ? 1 : 0.5 }}>
-              <option value="">Todo el día</option>
-              {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
-            </select>
-          </div>
-          {sigue.loVeia && !sinCompartir && (
-            <label style={{ ...linea, fontSize: 11.5 }}>
-              <input type="checkbox" checked={sigue.alCliente} onChange={e => setSigue(v => ({ ...v, alCliente: e.target.checked }))} />
-              Que el cliente también lo vea <span style={{ color: colors.muted }}>· el que se terminó lo veía</span>
-            </label>
-          )}
-          <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
-            Nace {sigue.de.etapa_id && nombreDeEtapa(sigue.de.etapa_id, catalogo) ? `en ${nombreDeEtapa(sigue.de.etapa_id, catalogo)}` : "sin etapa"}
-            {(() => { const t = tareas[sigue.de.tarea_id]; const q = t?.responsable_externo || users.find(u => u.id === t?.assignee_id)?.name; return q ? `, a cargo de ${q}` : ""; })()}
-            , y en el historial de los dos queda que uno sigue del otro. Con día y hora es una reunión.
-          </div>
-          {sigue.error && <div role="alert" style={{ fontSize: 10.5, color: colors.danger }}>{sigue.error}</div>}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button onClick={sumarLoQueSigue} disabled={ocupado} style={boton(true)}><CornerDownRight size={12} /> Agregar lo que sigue</button>
-            <button onClick={() => setSigue(null)} style={boton(false)}>Nada más</button>
-          </div>
-        </div>
-      )}
-      {/* Y cuando se agregó, lo dice: dónde quedó y de dónde viene. */}
-      {sigue?.nuevo && (
-        <div className="siguio-con" role="status" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: colors.successSoft,
-          border: `1px solid ${colors.successBorder}`, borderRadius: colors.radiusMd, padding: "7px 10px", marginBottom: 10, fontSize: 12, color: colors.ink }}>
-          <span style={{ flex: "1 1 200px", minWidth: 0, overflowWrap: "anywhere" }}>
-            <CornerDownRight size={12} color={colors.success} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            Agregado <strong>«{sigue.nuevo.texto}»</strong>, que sigue de «{sigue.de.texto}».
-            {sigue.reunion ? " Es una reunión: abrila para avisarle por correo a quien venga." : ""}
-          </span>
-          <button onClick={() => { setAbierta(sigue.nuevo.id); setSigue(null); }} style={mini(false)}>Abrirlo</button>
-          <button onClick={() => setSigue(null)} aria-label="Cerrar este aviso" style={{ ...mini(false), padding: "3px 6px" }}><X size={11} /></button>
         </div>
       )}
 
@@ -1067,8 +1007,14 @@ const boton = fuerte => ({
 // al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE VE EL CLIENTE DE ESTE PUNTO ·
 // ¿YA ESTÁ?. Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la
 // flecha.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, onPedirAprobacion = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onSigue = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, onPedirAprobacion = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onAvanzar = null, onEspera = null }) {
   const [nota, setNota] = useState(item.nota || "");
+  // EL ✓ PREGUNTA QUÉ PASÓ: null · "elegir" (los tres botones) · "avanzo" (se escribe qué sigue).
+  const [pregunta, setPregunta] = useState(null);
+  const [paso, setPaso] = useState({ texto: "", dia: "", alCliente: true, falta: "" });
+  // Lo que se toca poco, plegado: lo del cliente, y etapa / responsable / quitar.
+  const [verCliente, setVerCliente] = useState(false);
+  const [mas, setMas] = useState(false);
   useEffect(() => { setNota(item.nota || ""); }, [item.nota]);
   // Lo último que alguien anotó: se lee en la fila sin abrirla.
   const ultima = ultimaAnotacion(anotado);
@@ -1095,7 +1041,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   // El plazo del pedido que espera respuesta: cuánto le queda, o hace cuánto venció.
   const plazo = aprobacion?.estado === "pendiente" ? plazoDe(aprobacion.hasta, hoyISO()) : null;
   const estadoParaEl = item.hecho ? "Listo" : aprobacion?.estado === "pendiente" ? "Esperando su aprobación"
-    : item.espera ? "Hecho de nuestro lado · esperando respuesta" : "Pendiente";
+    : item.espera ? "En espera" : "Pendiente";
   // La descripción para el cliente: qué es este punto, dicho para él. Se
   // guarda sola al salir del casillero, y dice al lado que quedó guardada.
   const [paraEl, setParaEl] = useState({ descripcion: delCliente?.descripcion || "" });
@@ -1117,7 +1063,44 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
   const esReunion = t => !!(t?.hora || t?.type === "Reunión");
   const clase = CLASES[claseDe(tarea)];
   const hoy = hoyISO();
-  const vencida = !item.hecho && !item.espera && tarea?.due_date && String(tarea.due_date).slice(0, 10) < hoy;
+  // EN QUÉ ESTÁ, con palabras: es lo que dice la pastilla de la fila.
+  const est = estadoDeActividad(item, tarea, hoy);
+  const vencida = est.clase === "vencida";
+  const guardarPaso = async () => {
+    const falta = await onAvanzar?.({ texto: paso.texto, due_date: paso.dia, alCliente: paso.alCliente && puedeLeerlo });
+    if (falta) { setPaso(p => ({ ...p, falta })); return; }
+    setPregunta(null); setPaso({ texto: "", dia: "", alCliente: true, falta: "" });
+  };
+  // LO QUE DISTINGUE A ESTE PUNTO DE LOS DEMÁS, y nada más: qué es si no es una
+  // gestión, de quién, y del cliente solo cuando hay algo que decir.
+  const datos = [
+    claseDe(tarea) !== "gestion" ? <span style={{ color: clase.color, fontWeight: 700 }}>{clase.label.toLowerCase()}</span> : null,
+    item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ") || null : tomada(tarea) ? deQuien(tarea) : null,
+    // En qué etapa estaba el proyecto cuando se escribió.
+    etiqueta || null,
+    laVeElCliente && archivos.length ? <span className="archivos-del-cliente" style={{ color: colors.brand }}><Paperclip size={10} style={{ verticalAlign: "-1px" }} /> {cuantosDice(archivos)}</span> : null,
+    // Si se le pidió que lo apruebe, en qué está: es lo que se viene a mirar sin abrir el punto.
+    laVeElCliente && aprobacion ? (
+      <span className="aprobacion-del-cliente" data-estado={aprobacion.estado} data-vencida={plazo?.vencida ? "si" : "no"}
+        style={{ fontWeight: 700, color: aprobacion.estado === "aprobado" ? colors.success : aprobacion.estado === "observado" || plazo?.vencida ? colors.danger : colors.warning }}>
+        {aprobacion.estado === "aprobado" ? "aprobado por el cliente" : aprobacion.estado === "observado" ? "el cliente dejó observaciones"
+          // Con fecha límite, la fila dice cuánto le queda; y si se le pasó, que venció.
+          : plazo?.vencida ? `el cliente no aprobó: ${plazo.dice}` : `espera que el cliente apruebe${plazo ? ` · ${plazo.dice}` : ""}`}
+      </span>
+    ) : null,
+    // La que el cliente NO ve, en un proyecto donde ve las demás: esa sí se dice.
+    !laVeElCliente && hayCliente && !item.hecho && onCliente ? (
+      <span className="no-la-ve-el-cliente" title="El cliente no ve este punto. Abrilo y tocá «Para el cliente»." style={{ color: colors.warning }}>
+        <EyeOff size={10} style={{ verticalAlign: "-1px" }} /> no la ve el cliente
+      </span>
+    ) : null,
+  ].filter(Boolean);
+  // Qué ve el cliente de este punto, en una línea: lo que dice el pliegue cerrado.
+  const resumenDelCliente = !laVeElCliente ? "no ve este punto" : ["lo ve",
+    leidas ? (leidas === 1 ? "1 anotación" : `${leidas} anotaciones`) : null,
+    archivos.length ? cuantosDice(archivos) : null,
+    aprobacion ? (aprobacion.estado === "aprobado" ? "lo aprobó" : aprobacion.estado === "observado" ? "dejó observaciones" : "espera su aprobación") : null,
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="punto-del-checklist" data-id={item.id}
@@ -1129,54 +1112,27 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
       style={{ borderBottom: `1px solid ${colors.neutralSoft}`, background: abierta ? colors.bg : "transparent",
         margin: abierta ? "0 -12px" : 0, padding: abierta ? "0 12px" : 0, cursor: onAgarrar && !abierta ? "grab" : "auto" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0" }}>
-        <button onClick={() => editable && onMarcar?.(!item.hecho)} disabled={ocupado || !editable}
-          title={!editable ? "Solo mirar" : item.hecho ? "Desmarcar" : "Marcar como hecha"}
-          style={{ width: 18, height: 18, flexShrink: 0, marginTop: 1, borderRadius: 5, cursor: "pointer", padding: 0,
-            border: `1.5px solid ${item.hecho ? colors.success : vencida ? colors.danger : colors.border}`, background: item.hecho ? colors.success : "#fff",
+        <button className="que-paso-con-el-punto" disabled={ocupado || !editable} aria-expanded={!!pregunta}
+          onClick={() => { if (!editable) return; if (item.hecho) onMarcar?.(false); else setPregunta(p => (p ? null : "elegir")); }}
+          title={!editable ? "Solo mirar" : item.hecho ? "Volver a abrir" : "¿Qué pasó? Avanzó, queda en espera o terminó"}
+          aria-label={item.hecho ? "Volver a abrir" : "¿Qué pasó con este punto?"}
+          style={{ width: 20, height: 20, flexShrink: 0, marginTop: 0, borderRadius: "50%", cursor: editable ? "pointer" : "default", padding: 0,
+            border: `1.5px solid ${item.hecho ? colors.success : pregunta ? colors.brand : vencida ? colors.danger : colors.border}`,
+            background: item.hecho ? colors.success : pregunta ? colors.brand : "#fff",
             display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {item.hecho && <Check size={12} color="#fff" />}
+          <Check size={12} color={item.hecho || pregunta ? "#fff" : colors.muted} />
         </button>
         {/* Su color, el mismo del tablero. */}
-        <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: clase.color, opacity: item.hecho ? 0.4 : 1, flexShrink: 0 }} />
+        <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: clase.color, opacity: item.hecho || item.espera ? 0.4 : 1, flexShrink: 0 }} />
         <div onClick={onAbrir} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-          <div style={{ fontSize: 13, lineHeight: 1.35, color: item.hecho ? colors.muted : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>
+          <div style={{ fontSize: 13, lineHeight: 1.35, color: item.hecho ? colors.muted : item.espera ? colors.inkSoft : colors.ink, textDecoration: item.hecho ? "line-through" : "none", overflowWrap: "anywhere" }}>
             {item.texto}
           </div>
-          <div style={{ fontSize: 10.5, color: item.espera && !item.hecho ? colors.warning : colors.muted, marginTop: 1 }}>
-            <span style={{ color: clase.color, fontWeight: 700 }}>{clase.label.toLowerCase()}</span>
-            {(() => {
-              const resto = item.hecho ? [item.hecho_por, cuando(item.hecho_at)].filter(Boolean).join(" · ")
-                : item.espera ? "esperando a un tercero"
-                : tomada(tarea) ? deQuien(tarea)
-                : "";
-              return resto ? ` · ${resto}` : "";
-            })()}
-            {/* En qué etapa estaba el lead cuando se escribió. */}
-            {etiqueta ? ` · ${etiqueta}` : ""}
-            {laVeElCliente && (
-              <span className="la-ve-el-cliente" title="El cliente la ve en su enlace" style={{ color: colors.brand, fontWeight: 600 }}>
-                {" · "}<Eye size={10} style={{ verticalAlign: "-1px" }} /> la ve el cliente{archivos.length ? `, con ${cuantosDice(archivos)}` : ""}
-              </span>
-            )}
-            {/* Si se le pidió que lo apruebe, en qué está: es lo que se
-                viene a mirar sin abrir el punto. */}
-            {laVeElCliente && aprobacion && (
-              <span className="aprobacion-del-cliente" data-estado={aprobacion.estado} data-vencida={plazo?.vencida ? "si" : "no"}
-                style={{ fontWeight: 700, color: aprobacion.estado === "aprobado" ? colors.success : aprobacion.estado === "observado" || plazo?.vencida ? colors.danger : colors.warning }}>
-                {" · "}
-                {aprobacion.estado === "aprobado" ? "aprobado por el cliente" : aprobacion.estado === "observado" ? "el cliente dejó observaciones"
-                  // Con fecha límite, la fila dice cuánto le queda; y si se le pasó, que venció.
-                  : plazo?.vencida ? `el cliente no aprobó: ${plazo.dice}` : `espera que el cliente apruebe${plazo ? ` · ${plazo.dice}` : ""}`}
-              </span>
-            )}
-            {/* Y la que no ve, lo dice: en un proyecto donde ve las demás, una
-                fila sin la marca no explicaba por qué. */}
-            {!laVeElCliente && hayCliente && !item.hecho && onCliente && (
-              <span className="no-la-ve-el-cliente" title="El cliente no ve este punto. Abrilo y tocá «Mostrar al cliente»." style={{ color: colors.warning }}>
-                {" · "}<EyeOff size={10} style={{ verticalAlign: "-1px" }} /> no la ve el cliente
-              </span>
-            )}
-          </div>
+          {datos.length > 0 && (
+            <div className="datos-del-punto" style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+              {datos.map((d, i) => <Fragment key={i}>{i > 0 ? " · " : ""}{d}</Fragment>)}
+            </div>
+          )}
           {/* Lo último que se anotó: en qué va la gestión, sin abrirla. */}
           {ultima && !abierta && (
             <div className="ultima-anotacion" title={ultima.texto}
@@ -1189,40 +1145,99 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             </div>
           )}
         </div>
-        {/* La fecha, a la derecha y siempre en el mismo lugar: es lo que
-            ordena la lista. */}
-        {!item.hecho && (
-          <span style={{ fontSize: 11.5, whiteSpace: "nowrap", flexShrink: 0, marginTop: 1,
-            color: vencida ? colors.danger : tarea?.due_date ? colors.inkSoft : colors.warning, fontWeight: vencida ? 700 : 400 }}>
-            {tarea?.due_date ? `${cuando(tarea.due_date)}${tarea.hora ? ` ${tarea.hora}` : ""}` : "sin fecha"}
-          </span>
-        )}
+        {/* EN QUÉ ESTÁ, a la derecha y siempre en el mismo lugar. */}
+        <span className="estado-de-la-actividad" data-estado={est.clase} style={pildora(est.clase)}>
+          {est.clase === "espera" && <Hourglass size={10} />}{est.dice}
+        </span>
         {/* La flecha dice que la fila se abre, y la cierra. */}
         <button className="abrir-o-cerrar" onClick={onAbrir} aria-expanded={abierta} aria-label={abierta ? "Cerrar este punto" : "Abrir este punto"}
-          title={abierta ? "Cerrar" : "Abrir: para cuándo, qué pasó, qué ve el cliente"}
+          title={abierta ? "Cerrar" : "Abrir: qué pasó, para cuándo, y lo del cliente"}
           style={{ background: "none", border: "none", padding: 1, cursor: "pointer", color: colors.muted, flexShrink: 0, display: "flex", marginTop: 1 }}>
           {abierta ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </button>
       </div>
 
+      {/* ¿QUÉ PASÓ CON ESTE PUNTO? Lo que pregunta el ✓, ahí mismo y con palabras.
+          Antes el ✓ lo cerraba sin preguntar y lo que seguía nacía como otro punto. */}
+      {pregunta && editable && !item.hecho && (
+        <div className="que-paso" style={{ margin: "0 0 10px 30px", background: colors.brandSoft, borderRadius: colors.radiusMd, padding: 10, display: "grid", gap: 7 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: colors.ink, overflowWrap: "anywhere" }}>¿Qué pasó con «{item.texto}»?</div>
+          {pregunta === "elegir" ? (
+            <div style={{ display: "grid", gap: 6 }}>
+              <button className="avanzo" onClick={() => setPregunta("avanzo")} disabled={ocupado} style={opcion}>
+                <span style={icono(colors.brandSoft, colors.brand)}><CornerDownRight size={13} /></span>
+                <span><strong>Avanzó: anotar qué sigue</strong><br /><span style={dice}>Sigue siendo este punto, con su historial.</span></span>
+              </button>
+              <button className="queda-en-espera" onClick={() => { setPregunta(null); onEspera?.(!item.espera); }} disabled={ocupado} style={opcion}>
+                <span style={icono(colors.warningSoft, colors.warning)}><Hourglass size={13} /></span>
+                {item.espera
+                  ? <span><strong>Ya no está en espera</strong><br /><span style={dice}>Vuelve a estar en curso.</span></span>
+                  : <span><strong>Queda en espera</strong><br /><span style={dice}>Se hizo lo que tocaba y todavía no hay paso nuevo. No se cierra.</span></span>}
+              </button>
+              <button className="terminada" onClick={() => { setPregunta(null); onMarcar?.(true); }} disabled={ocupado} style={opcion}>
+                <span style={icono(colors.successSoft, colors.success)}><Check size={13} /></span>
+                <span><strong>Terminada: ya no hay más que hacer</strong><br /><span style={dice}>Pasa a «hechos»{laVeElCliente ? ", y el cliente la ve como lista" : ""}. Se puede volver a abrir.</span></span>
+              </button>
+              <div><button className="cancelar-que-paso" onClick={() => setPregunta(null)} style={mini(false)}>Cancelar</button></div>
+            </div>
+          ) : (
+            <>
+              <input className="que-sigue-en-el-punto" value={paso.texto} autoFocus aria-label="Qué pasó, o qué sigue"
+                onChange={e => setPaso(p => ({ ...p, texto: e.target.value, falta: "" }))}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); guardarPaso(); } }}
+                placeholder="Qué pasó, o qué sigue. Ej: llegó la cotización; gestionar reunión para consultas"
+                style={{ ...chico, width: "100%", boxSizing: "border-box", background: "#fff" }} />
+              {puedeCorrer && (
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 10.5, color: colors.inkSoft }}>Para cuándo (opcional):</span>
+                  {[["Hoy", 0], ["Mañana", 1], ["En una semana", 7]].map(([txt, n]) => {
+                    const f = sumarDias(hoy, n);
+                    return <button key={txt} onClick={() => setPaso(p => ({ ...p, dia: p.dia === f ? "" : f }))} style={mini(paso.dia === f)}>{txt}</button>;
+                  })}
+                  <input type="date" value={paso.dia} aria-label="Para cuándo queda" onChange={e => setPaso(p => ({ ...p, dia: e.target.value }))}
+                    style={{ ...chico, width: 128, padding: "2px 6px", fontSize: 11.5, background: "#fff" }} />
+                </div>
+              )}
+              {puedeLeerlo && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: colors.inkSoft, cursor: "pointer" }}>
+                  <input type="checkbox" className="que-lo-lea-el-cliente" checked={paso.alCliente} onChange={e => setPaso(p => ({ ...p, alCliente: e.target.checked }))} />
+                  Que el cliente lo lea en su enlace
+                </label>
+              )}
+              {paso.falta && <div role="alert" style={{ fontSize: 10.5, color: colors.danger }}>{paso.falta}</div>}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button className="anotar-el-paso" onClick={guardarPaso} disabled={ocupado} style={boton(true)}><CornerDownRight size={12} /> Anotar</button>
+                <button onClick={() => setPregunta("elegir")} style={boton(false)}>Volver</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {abierta && (
-        <div className="punto-abierto" style={{ paddingLeft: 29, paddingBottom: 10, display: "grid", gap: 10 }}>
+        <div className="punto-abierto" style={{ paddingLeft: 30, paddingBottom: 10, display: "grid", gap: 10 }}>
           {/* Qué es, en una línea, y por dónde se sale. */}
           <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: colors.muted, lineHeight: 1.5 }}>
               {item.hecho
                 ? `Hecha${item.hecho_por ? ` por ${item.hecho_por}` : ""}${item.hecho_at ? ` el ${cuando(item.hecho_at)}` : ""}.`
-                : item.espera ? "Ya se hizo lo nuestro: espera a un tercero."
-                : "Todavía por hacer."}
+                : item.espera ? "En espera." : "En curso."}
               {tomada(tarea) ? (
                 <> A cargo de <strong style={{ color: colors.ink }}>{deQuien(tarea)}</strong>{tarea.responsable_externo ? " (de afuera)" : ""}.</>
               ) : tarea ? (
                 <> Todavía sin responsable.</>
               ) : null}
-              {" "}Es la misma tarea que se ve en Tareas.
             </div>
             <button className="cerrar-punto" onClick={onAbrir} style={mini(false)}><ChevronUp size={11} /> Cerrar</button>
           </div>
+
+          {/* ¿QUÉ PASÓ? El historial. Qué pasó con este punto, en orden: lo que
+              alguien anotó —en negro— y lo que pasó solo —en gris—. Antes eran
+              un «Comentarios», una nota suelta que se pisaba y la bitácora del
+              proyecto, cada cosa por su lado. */}
+          <HistorialDeTarea tarea={tarea} users={users} currentUser={currentUser} editable={editable} ocupado={ocupado}
+            anotado={anotado} pasado={pasado} onAnotar={anotarPaso} titulo="¿QUÉ PASÓ? · EL HISTORIAL DE ESTE PUNTO"
+            paraElCliente={puedeLeerlo} onMostrarNota={mostrarNota} />
 
           {/* ¿PARA CUÁNDO? La fecha se cambia de un toque. AGENDAR ES ACÁ
               MISMO: los tres botones alcanzan para «mañana»; una reunión es un
@@ -1262,28 +1277,40 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                   </button>
                 )}
               </div>
-              <div style={ayudita}>
-                {esReunion(tarea) && tarea?.due_date
-                  ? "Es una reunión. «Avisar por correo» le manda la invitación a quien elijas, para que le quede en su calendario."
-                  : tarea?.due_date
-                    ? "Ese día le aparece a quien lo tiene a cargo. Si le ponés hora queda como reunión, en este mismo punto, y se puede avisar por correo."
-                    : "Se guarda al tocar. Con un día, le aparece a quien lo tiene a cargo y FOREMAN lo recuerda. Para agendar una reunión no se abre otra tarea: se le pone día y hora a este punto."}
-              </div>
             </div>
           )}
 
-          {/* ¿QUÉ PASÓ? El historial. Qué pasó con este punto, en orden: lo que
-              alguien anotó —en negro— y lo que pasó solo —en gris—. Antes eran
-              un «Comentarios», una nota suelta que se pisaba y la bitácora del
-              proyecto, cada cosa por su lado. */}
-          <HistorialDeTarea tarea={tarea} users={users} currentUser={currentUser} editable={editable} ocupado={ocupado}
-            anotado={anotado} pasado={pasado} onAnotar={anotarPaso} titulo="¿QUÉ PASÓ? · EL HISTORIAL DE ESTE PUNTO"
-            paraElCliente={puedeLeerlo} onMostrarNota={mostrarNota} />
+          {/* SU ESTADO: dejarlo en espera, o terminarlo. Lo mismo que pregunta el ✓ de la fila. */}
+          {editable && !item.hecho && (
+            <div className="ya-esta" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button className="en-espera" onClick={() => onEspera?.(!item.espera)} disabled={ocupado} style={mini(item.espera)}>
+                <Hourglass size={11} /> {item.espera ? "Ya no está en espera" : "Dejar en espera"}
+              </button>
+              <button className="marcar-hecha" onClick={() => onMarcar?.(true)} disabled={ocupado}
+                style={{ ...mini(false), background: colors.success, borderColor: colors.success, color: "#fff", padding: "4px 11px" }}>
+                <Check size={11} /> Terminada
+              </button>
+            </div>
+          )}
+          {editable && item.hecho && (
+            <div className="ya-esta" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button className="volver-a-abrir" onClick={() => onMarcar?.(false)} disabled={ocupado} style={mini(false)}><RotateCcw size={11} /> Volver a abrir</button>
+            </div>
+          )}
 
+          {/* PARA EL CLIENTE, plegado: dice en una línea qué ve, y se abre para lo demás. */}
+          {(laVeElCliente || (onCliente && editable)) && (
+            <button className="ver-lo-del-cliente" aria-expanded={verCliente} onClick={() => setVerCliente(v => !v)} style={pliegue}>
+              {verCliente ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {laVeElCliente ? <Eye size={11} color={colors.brand} /> : <EyeOff size={11} />}
+              <strong style={{ letterSpacing: 0.4, color: laVeElCliente ? colors.brand : colors.inkSoft }}>PARA EL CLIENTE</strong>
+              <span style={{ color: colors.inkSoft, overflowWrap: "anywhere", textAlign: "left" }}>{resumenDelCliente}</span>
+            </button>
+          )}
           {/* LO QUE VE EL CLIENTE DE ESTE PUNTO, en su enlace y en el correo:
               el título y en qué está, las anotaciones del historial marcadas
               para él, y las fotos y archivos que se suben acá. */}
-          {laVeElCliente && (
+          {verCliente && laVeElCliente && (
             <div className="para-el-cliente" style={{ background: colors.brandSoft, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <Eye size={11} color={colors.brand} style={{ flexShrink: 0 }} />
@@ -1409,7 +1436,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
             </div>
           )}
           {/* Si no se le muestra, lo dice, y ahí mismo se le muestra. */}
-          {!laVeElCliente && onCliente && editable && (
+          {verCliente && !laVeElCliente && onCliente && editable && (
             <div className="no-lo-ve-el-cliente" style={{ border: `1px dashed ${colors.border}`, borderRadius: colors.radiusSm, padding: "8px 10px", display: "grid", gap: 5 }}>
               <div style={{ ...titulito, display: "flex", alignItems: "center", gap: 5 }}><EyeOff size={11} /> <span>EL CLIENTE NO VE ESTE PUNTO</span></div>
               <div>
@@ -1431,40 +1458,16 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               style={{ ...chico, width: "100%", boxSizing: "border-box", resize: "vertical", lineHeight: 1.4 }} />
           )}
 
-          {/* ¿YA ESTÁ? Terminarlo, o decir que lo nuestro ya se hizo y falta
-              otro. Antes la única forma de terminarlo era la casilla de la
-              fila, y nada decía qué pasaba después. */}
-          {editable && !item.hecho && (
-            <div className="ya-esta" style={parte}>
-              <div style={titulito}>¿YA ESTÁ?</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button className="marcar-hecha" onClick={() => onMarcar?.(true)} disabled={ocupado}
-                  style={{ ...mini(false), background: colors.success, borderColor: colors.success, color: "#fff", padding: "4px 11px" }}>
-                  <Check size={11} /> Marcar como hecha
-                </button>
-                <button onClick={() => hacer(() => marcarEspera(item, !item.espera, currentUser))} disabled={ocupado} style={mini(item.espera)}>
-                  <Hourglass size={11} /> {item.espera ? "Ya no espera a un tercero" : "Lo nuestro ya está: espera a un tercero"}
-                </button>
-              </div>
-              <div style={ayudita}>
-                Al marcarla pasa a «hechos»{laVeElCliente ? " —el cliente la ve como lista—" : ""} y te pregunto qué sigue: lo que sigue nace de este punto, en su misma etapa y a cargo de la misma persona.
-              </div>
-            </div>
-          )}
-          {editable && item.hecho && (
-            <div className="ya-esta" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button className="volver-a-abrir" onClick={() => onMarcar?.(false)} disabled={ocupado} style={mini(false)}><RotateCcw size={11} /> Volver a abrir</button>
-              {onSigue && <button className="agregar-lo-que-sigue" onClick={onSigue} disabled={ocupado} style={mini(false)}><CornerDownRight size={11} /> Agregar lo que sigue</button>}
-            </div>
-          )}
-
-          {/* AL PIE, lo que se toca poco: de qué etapa es, de quién, si se le
+          {/* AL PIE, lo que se toca poco y a un toque: de qué etapa es, de quién, si se le
               deja de mostrar al cliente, quitarlo. Y cerrar. */}
           {editable && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", borderTop: `1px solid ${colors.border}`, paddingTop: 8 }}>
+            <button className="ver-mas" aria-expanded={mas} onClick={() => setMas(v => !v)} style={mini(false)}>
+              {mas ? <ChevronDown size={11} /> : <ChevronRight size={11} />} {mas ? "Menos" : "Más: etapa, responsable, quitar"}
+            </button>
             {/* DE QUÉ ETAPA ES. La dice el punto: se puede tener hoy algo de
                 Presupuesto con el proyecto todavía en Ingenierías. */}
-            {onEtapa && etapas.length > 0 && (
+            {mas && onEtapa && etapas.length > 0 && (
               <>
                 <span style={{ fontSize: 10.5, color: colors.muted }}>Etapa:</span>
                 <select value={item.etapa_id || ""} aria-label="De qué etapa es este punto" disabled={ocupado}
@@ -1477,19 +1480,23 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
                 </select>
               </>
             )}
-            <button onClick={onTarea} style={mini(false)} title="Quién lo hace, qué dice y qué es: gestión, tarea o reunión">
-              <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable o título" : "Asignar responsable"}
-            </button>
+            {mas && (
+              <button onClick={onTarea} style={mini(false)} title="Quién lo hace, qué dice y qué es: gestión, tarea o reunión">
+                <ListTodo size={11} /> {tarea && (tarea.assignee_id || tarea.responsable_externo) ? "Cambiar responsable o título" : "Asignar responsable"}
+              </button>
+            )}
             {/* Dejar de mostrársela al cliente: deja de ver qué dice y si
                 está lista. */}
-            {onCliente && laVeElCliente && (
+            {mas && onCliente && laVeElCliente && (
               <button onClick={() => onCliente(false)} disabled={ocupado} aria-pressed style={mini(true)}>
                 <EyeOff size={11} /> Dejar de mostrarle al cliente
               </button>
             )}
-            <button onClick={() => { if (window.confirm("¿Borrar esta tarea? Es la misma que está en Tareas: se borra de los dos lados.")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
-              style={{ ...mini(false), color: colors.danger, marginLeft: "auto" }}><X size={11} /> Quitar</button>
-            <button className="cerrar-punto" onClick={onAbrir} style={mini(false)}><ChevronUp size={11} /> Cerrar</button>
+            {mas && (
+              <button onClick={() => { if (window.confirm("¿Borrar esta tarea? Es la misma que está en Tareas: se borra de los dos lados.")) hacer(() => borrarItem(item, currentUser)); }} disabled={ocupado}
+                style={{ ...mini(false), color: colors.danger }}><X size={11} /> Quitar</button>
+            )}
+            <button className="cerrar-punto" onClick={onAbrir} style={{ ...mini(false), marginLeft: "auto" }}><ChevronUp size={11} /> Cerrar</button>
           </div>
           )}
         </div>
@@ -1502,6 +1509,21 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
 const parte = { display: "grid", gap: 5 };
 const titulito = { fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.4 };
 const ayudita = { fontSize: 10.5, color: colors.muted, lineHeight: 1.45 };
+
+// Las tres respuestas a «¿qué pasó?»: un botón entero cada una, con su ícono y lo que hace.
+const opcion = { display: "flex", gap: 9, alignItems: "center", textAlign: "left", width: "100%", background: "#fff", border: `1px solid ${colors.border}`,
+  borderRadius: 9, padding: "8px 10px", cursor: "pointer", fontFamily: colors.font, fontSize: 12.5, color: colors.ink, lineHeight: 1.35 };
+const icono = (fondo, color) => ({ flex: "0 0 26px", height: 26, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: fondo, color });
+const dice = { fontSize: 11, color: colors.inkSoft, fontWeight: 400 };
+// El estado de una actividad, en una pastilla.
+const pildora = cual => ({
+  display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10.5, fontWeight: 700, borderRadius: 14, padding: "2px 9px", whiteSpace: "nowrap", flexShrink: 0, marginTop: 1,
+  background: cual === "espera" ? colors.warningSoft : cual === "vencida" ? colors.dangerSoft : cual === "fecha" ? colors.brandSoft : cual === "hecha" ? colors.successSoft : colors.neutralSoft,
+  color: cual === "espera" ? colors.warning : cual === "vencida" ? colors.danger : cual === "fecha" ? colors.brand : cual === "hecha" ? colors.success : colors.inkSoft,
+});
+// Lo que está plegado, y se abre de un toque.
+const pliegue = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "none", border: "none", padding: 0, cursor: "pointer",
+  fontFamily: colors.font, fontSize: 10.5, color: colors.muted };
 
 const mini = activo => ({
   display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,

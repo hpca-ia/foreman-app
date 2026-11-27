@@ -170,7 +170,7 @@ test("LO QUE PREGUNTÓ: el punto nuevo dice si lo ve el cliente, y nace a la vis
   // Lo mismo la lista pegada.
   assert.match(lista, /alCliente: \(pegar\.alCliente \?\? naceALaVista\) && !sinCompartir,/);
   // Y la fila que el cliente no ve, lo dice: solo donde ve las demás.
-  assert.match(lista, /\{!laVeElCliente && hayCliente && !item\.hecho && onCliente && \(\s+<span className="no-la-ve-el-cliente"/);
+  assert.match(lista, /!laVeElCliente && hayCliente && !item\.hecho && onCliente \? \(\s+<span className="no-la-ve-el-cliente"/);
   assert.match(lista, /hayCliente=\{compartidas\.size > 0\} sinNotas=\{historial\.sinNotasAlCliente\}/);
 });
 
@@ -180,7 +180,7 @@ test("LO QUE PREGUNTÓ: dónde se suben los archivos tiene su título, adentro d
   const caja = lista.slice(lista.indexOf('className="para-el-cliente"'), lista.indexOf('className="no-lo-ve-el-cliente"'));
   assert.match(caja, /<FotosYArchivosDelCliente lead=\{lead \|\| \{ id: item\.lead_id \}\} punto=\{item\}/);
   // Ya no depende de la migración de los textos: basta con que el cliente vea el punto.
-  assert.match(lista, /\{laVeElCliente && \(\s+<div className="para-el-cliente"/);
+  assert.match(lista, /\{verCliente && laVeElCliente && \(\s+<div className="para-el-cliente"/);
   // El botón dice «subir», que es como lo preguntó.
   assert.match(codigoDe("../src/modules/leads/FotosYArchivosDelCliente.jsx"), /"Subir más fotos o archivos" : "Subir fotos o archivos"/);
   // Y el punto que no ve dice que ahí se abre dónde subirlos.

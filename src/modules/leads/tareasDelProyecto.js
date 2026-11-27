@@ -14,6 +14,8 @@
 //
 // Acá están las reglas, sin base de datos, para poder probarlas.
 
+import { diaCorto } from "./pipeline.js";
+
 /** Los campos de la tarea que usa la pantalla del proyecto. */
 export const COLUMNAS = "id,title,status,due_date,hora,priority,type,notes,assignee_id,responsable_externo,"
   + "lead_id,etapa_id,espera,nota,hecha_at,hecha_por,ruta_orden,compra_id,created_at,created_by,descartada";
@@ -135,8 +137,7 @@ export const conTitulosDeEtapa = (grupos = [], etapaDelProyecto = null) =>
  *
  * @returns { abiertas, hechas }
  *   abiertas · primero lo que tiene fecha, por fecha —la primera es el próximo
- *              paso—; después lo que no tiene, y al fondo lo que ya se hizo de
- *              nuestro lado y espera a un tercero
+ *              paso—; después lo que no tiene, y al fondo lo que está en espera
  *   hechas   · la más reciente arriba
  */
 export function delProyecto(tareas = []) {
@@ -180,39 +181,61 @@ export function filaNueva({
   };
 }
 
+// ─── UNA ACTIVIDAD ES UN TEMA QUE AVANZA ───────────────────────────────────
+//
+// Hernán, 26/11/2026: «Cuando tienes una actividad o tarea, pasar a la
+// siguiente es confuso. Ya tengo la actividad FOGA, ¿el check quiere decir
+// completada? En efecto se completó pero quiero que quede en stand-by hasta
+// tener nuevo paso... ¿se cierra y se abre nueva?».
+//
+// Se cerraba y se abría una nueva. El ✓ mandaba el punto a «hechos» y
+// preguntaba «¿qué sigue?» arriba de la lista; lo que se escribiera nacía como
+// OTRO punto, con ese texto de nombre y el historial vacío. Las cuatro veces
+// que se usó en RES BG se escribió un estado —«STBY, gestionar reunión para
+// consultas», «Base recibida para presupuesto»— y después hubo que renombrar
+// cada uno para devolverle el tema: FOGA, Sanitario, Eléctrico, Estructural.
+// Y el «espera a un tercero» estaba al fondo del punto abierto: en toda la
+// base no se había marcado nunca.
+//
+// Ahora el punto es el TEMA, y no se cierra para avanzar. El ✓ pregunta ahí
+// mismo qué pasó, y hace una de tres cosas:
+//
+//   AVANZÓ      se anota en el MISMO punto qué pasó o qué sigue —con su fecha,
+//               si la tiene—. Sigue llamándose igual, con todo su historial.
+//   EN ESPERA   se hizo lo que tocaba y todavía no hay paso nuevo. Queda en la
+//               lista, al fondo de su etapa, hasta que se retome.
+//   TERMINADA   ya no hay más que hacer: recién ahí pasa a «hechos».
+
 /**
- * LO QUE SIGUE, cuando un punto se termina.
+ * EN QUÉ ESTÁ UNA ACTIVIDAD, en palabras: lo que dice la pastilla de su fila.
  *
- * Hernán, 17/11/2026: «¿qué sucede cuando ya se completa esa tarea o
- * gestión... si se agenda reunión o se pasa a otra actividad relacionada? ¿Se
- * abre una nueva tarea? ¿O se genera desde ahí mismo, por continuidad?». No
- * pasaba nada: el punto se iba a «hechos» y lo que seguía había que acordarse
- * de cargarlo aparte, sin nada que dijera de dónde venía.
- *
- * Ahora al terminarlo se pregunta qué sigue, y lo que se escriba nace de él:
- * en su misma etapa, a cargo de la misma persona, y con día y hora es una
- * reunión. No es obligatorio: «Nada más» y listo.
- *
- * @param de      el punto que se terminó, como lo dibuja la lista
- * @param tarea   su fila: de ahí sale quién lo tenía
- * @param clase   qué era (claseDe): una tarea sigue en tarea, lo demás en gestión
- * @returns { error } o lo que se le pasa a agregarTarea
+ * @param item   el punto, como lo dibuja la lista
+ * @param tarea  su fila: de ahí sale para cuándo es
+ * @param hoy    AAAA-MM-DD
+ * @returns { clase, dice } con clase «hecha» · «espera» · «vencida» · «fecha» · «curso»
  */
-export function loQueSigue({ de, tarea = null, clase = "gestion", texto, due_date = null, hora = null }) {
-  const titulo = String(texto || "").trim();
-  if (!titulo) return { error: "Escribí qué sigue, o tocá «Nada más»." };
-  if (hora && !due_date) return { error: "Para ponerle hora, primero elegí el día." };
-  const conHora = !!(due_date && hora);
-  return {
-    titulo,
-    etapaId: de?.etapa_id || null,
-    tipo: conHora ? "Reunión" : clase === "tarea" ? "Otro" : "Gestión",
-    due_date: due_date || null,
-    hora: conHora ? hora : null,
-    assignee_id: tarea?.assignee_id || null,
-    responsable_externo: tarea?.responsable_externo || null,
-    vieneDe: de ? { id: de.id, texto: de.texto } : null,
-  };
+export function estadoDeActividad(item, tarea = null, hoy = "") {
+  if (item?.hecho) return { clase: "hecha", dice: "Hecha" };
+  if (item?.espera) return { clase: "espera", dice: "En espera" };
+  const para = dia(tarea?.due_date);
+  if (para && hoy && para < hoy) return { clase: "vencida", dice: `Venció el ${diaCorto(para)}` };
+  if (para) return { clase: "fecha", dice: `${para === hoy ? "Para hoy" : `Para el ${diaCorto(para)}`}${tarea?.hora ? ` ${tarea.hora}` : ""}` };
+  return { clase: "curso", dice: "En curso" };
+}
+
+/**
+ * AVANZÓ: lo que se anota en la misma actividad, y lo que cambia con eso.
+ *
+ * @param item      el punto
+ * @param texto     qué pasó, o qué sigue
+ * @param due_date  para cuándo queda (opcional): sin día, su fecha no se toca
+ * @returns { error } o { nota, fecha?, sacarDeEspera }
+ */
+export function alAvanzar({ item = null, texto, due_date = "" } = {}) {
+  const nota = String(texto || "").trim();
+  if (!nota) return { error: "Escribí qué pasó, o qué sigue." };
+  const fecha = dia(due_date);
+  return { nota, ...(fecha ? { fecha } : {}), sacarDeEspera: !!item?.espera };
 }
 
 /** Lo que cambia en la tarea al marcarla hecha, o al volver a abrirla. */

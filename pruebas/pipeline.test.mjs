@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   TIPOS, tipoDe, sePersigue, esProyecto, etapasDelTipo, etapaDelLead, etapaAlCambiarDeTipo,
-  diasEntre, sumarDias, diaCorto, proximoPaso, estadoDelLead, loQueDice, avisosDelPipeline, esMiAviso,
-  alEsperar, alResponder, alInsistir, alPosponer, alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, porTipo,
+  diasEntre, sumarDias, diaCorto, proximoPaso, estadoDelLead, enEspera, loQueDice, avisosDelPipeline, esMiAviso,
+  alEsperar, alResponder, alPosponer, SE_ESPERA, alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, porTipo,
   CATALOGO_BASE,
 } from "../src/modules/leads/pipeline.js";
 import { avisosDelTablero } from "../src/lib/avisos.js";
@@ -109,52 +109,62 @@ test("el próximo paso es la tarea abierta más próxima; las compras no cuentan
   assert.equal(proximoPaso(), null);
 });
 
-test("un lead está en una de cinco: al día, vencido, sin paso, esperando, o para insistir", () => {
-  const dice = (l, ts) => { const e = estadoDelLead(l, ts, HOY); return [e.clase, loQueDice(e)]; };
+// Hernán, 26/11/2026: «El workflow del pipeline es confuso». De sus nueve
+// proyectos, cinco estaban en «Insistir con el cliente» en rojo desde hacía
+// hasta quince días, y «Insistí hoy» no se había usado nunca.
+test("un proyecto está EN CURSO o EN ESPERA, y dice lo suyo; no tener fechas ya no es una falta", () => {
+  const dice = (l, ts) => { const e = estadoDelLead(l, ts, HOY); return [e.clase, enEspera(e), loQueDice(e)]; };
 
-  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-11-14" })]), ["al_dia", "«Presupuesto corregido» · en 3 días"]);
-  assert.deepEqual(dice(lead(), [tarea({ due_date: HOY })]), ["al_dia", "«Presupuesto corregido» · hoy"]);
-  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-11-12" })]), ["al_dia", "«Presupuesto corregido» · mañana"]);
-  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-10-23" })]), ["vencido", "«Presupuesto corregido» · atrasado 19 días"]);
-  // Nada por delante: es el que se pierde sin que nadie lo decida.
-  assert.deepEqual(dice(lead(), []), ["sin_paso", "Sin próximo paso"]);
-  // Tiene qué hacer pero no cuándo: nadie lo va a volver a mirar.
-  assert.deepEqual(dice(lead(), [tarea()]), ["sin_paso", "«Presupuesto corregido» · sin fecha"]);
+  // EN CURSO.
+  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-11-14" })]), ["al_dia", false, "«Presupuesto corregido» · en 3 días"]);
+  assert.deepEqual(dice(lead(), [tarea({ due_date: HOY })]), ["al_dia", false, "«Presupuesto corregido» · hoy"]);
+  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-11-12" })]), ["al_dia", false, "«Presupuesto corregido» · mañana"]);
+  assert.deepEqual(dice(lead(), [tarea({ due_date: "2026-10-23" })]), ["vencido", false, "«Presupuesto corregido» · atrasado 19 días"]);
+  // Sin fechas, o sin nada abierto: se dice cuánto hay, y no es una falta.
+  assert.deepEqual(dice(lead(), []), ["sin_paso", false, "Sin actividades abiertas"]);
+  assert.deepEqual(dice(lead(), [tarea()]), ["sin_paso", false, "1 actividad abierta, sin fecha"]);
+  // Lo hecho y las compras no cuentan.
+  assert.deepEqual(dice(lead(), [tarea(), tarea({ id: 2 }), tarea({ id: 3, status: "listo" }), tarea({ id: 4, type: "Compra" })]), ["sin_paso", false, "2 actividades abiertas, sin fecha"]);
 
-  // Esperando al cliente: la pelota está del otro lado hasta el día que se dijo.
+  // EN ESPERA: la pelota está del otro lado hasta el día que se dijo.
   const espera = lead({ espera_desde: "2026-11-06", espera_que: "que apruebe el presupuesto", recordar_el: "2026-11-13" });
-  assert.deepEqual(dice(espera, []), ["esperando", "Esperando al cliente hace 5 días · que apruebe el presupuesto · se recuerda el 13 nov"]);
+  assert.deepEqual(dice(espera, []), ["esperando", true, "En espera hace 5 días · que apruebe el presupuesto · se recuerda el 13 nov"]);
   // Aunque tenga un paso nuestro atrasado: mientras espera, manda la espera.
   assert.equal(estadoDelLead(espera, [tarea({ due_date: "2026-10-01" })], HOY).clase, "esperando");
-  // Llegó el día: hay que insistir. Es el texto que pidió Hernán.
-  assert.deepEqual(dice({ ...espera, recordar_el: HOY }, []), ["insistir", "Insistir con el cliente: sin respuesta hace 5 días · que apruebe el presupuesto"]);
-  assert.equal(estadoDelLead({ ...espera, recordar_el: "2026-11-09" }, [], HOY).clase, "insistir");
-  // Sin día de recordatorio se recuerda ya: no puede quedar esperando para siempre.
-  assert.equal(estadoDelLead({ ...espera, recordar_el: null }, [], HOY).clase, "insistir");
-  assert.equal(loQueDice(estadoDelLead(lead({ espera_desde: "2026-11-10", recordar_el: HOY }), [], HOY)), "Insistir con el cliente: sin respuesta hace 1 día");
+  // SIN RECORDATORIO ESTÁ ESTACIONADO, NO EN FALTA. (Antes «sin día se recuerda ya», y volvía en rojo.)
+  assert.deepEqual(dice({ ...espera, recordar_el: null }, []), ["esperando", true, "En espera hace 5 días · que apruebe el presupuesto"]);
+  // Llegó el día que se pidió: toca revisarlo, y dice hace cuánto tocaba.
+  assert.deepEqual(dice({ ...espera, recordar_el: HOY }, []), ["insistir", true, "En espera hace 5 días · que apruebe el presupuesto · tocaba revisarlo hoy"]);
+  assert.deepEqual(dice({ ...espera, espera_que: null, recordar_el: "2026-11-09" }, []), ["insistir", true, "En espera hace 5 días · tocaba revisarlo hace 2 días"]);
+  assert.equal(loQueDice(estadoDelLead(lead({ espera_desde: "2026-11-10", recordar_el: "2026-11-10" }), [], HOY)), "En espera hace 1 día · tocaba revisarlo hace 1 día");
 });
 
-test("esperar al cliente: se dice qué y cuándo recordarlo, y cada toque queda en la historia", () => {
+test("dejar en espera: qué se espera y el recordatorio son opcionales, y cada toque queda en la historia", () => {
   const e = alEsperar({ que: " que apruebe el presupuesto ", recordarEl: "2026-11-14", hoy: HOY });
   assert.deepEqual(e.campos, { espera_desde: HOY, espera_que: "que apruebe el presupuesto", recordar_el: "2026-11-14" });
-  assert.equal(e.detalle, "Queda esperando respuesta del cliente: que apruebe el presupuesto. Se recuerda el 14 nov.");
-  assert.equal(alEsperar({ recordarEl: "2026-11-18", hoy: HOY }).campos.espera_que, null);
-  assert.ok(alEsperar({ que: "x", recordarEl: "", hoy: HOY }).error);
+  assert.equal(e.detalle, "Queda en espera: que apruebe el presupuesto. Se recuerda el 14 nov.");
+  // SIN RECORDATORIO: queda estacionado, y no avisa.
+  const sin = alEsperar({ que: "Un proveedor", hoy: HOY });
+  assert.deepEqual([sin.campos, sin.detalle], [{ espera_desde: HOY, espera_que: "Un proveedor", recordar_el: null }, "Queda en espera: Un proveedor. Sin recordatorio."]);
+  assert.deepEqual(alEsperar({ recordarEl: "", hoy: HOY }).campos, { espera_desde: HOY, espera_que: null, recordar_el: null });
+  assert.equal(estadoDelLead({ ...lead(), ...sin.campos }, [], HOY).clase, "esperando");
   assert.ok(alEsperar({ que: "x", recordarEl: "2026-11-01", hoy: HOY }).error, "no se recuerda en el pasado");
+  // De quién se espera, de un toque: es lo que se escribe.
+  assert.deepEqual(SE_ESPERA, ["Respuesta del cliente", "Un proveedor", "Lo retomamos más adelante"]);
 
   const esperando = lead({ espera_desde: "2026-11-06", espera_que: "x", recordar_el: HOY });
-  // Insistí hoy: sigue esperando desde el mismo día, y se vuelve a recordar.
-  const i = alInsistir(esperando, { recordarEl: "2026-11-14", hoy: HOY });
-  assert.deepEqual(i.campos, { recordar_el: "2026-11-14" });
-  assert.equal(i.detalle, "Insistió con el cliente: sin respuesta hace 5 días. Se vuelve a recordar el 14 nov.");
-  assert.ok(alInsistir(esperando, { recordarEl: HOY, hoy: HOY }).error, "volver a recordarlo hoy no sirve");
-  // Recordarme el…: corre la fecha sin anotar una insistencia.
-  assert.deepEqual(alPosponer({ recordarEl: "2026-11-20", hoy: HOY }), { campos: { recordar_el: "2026-11-20" }, detalle: "El recordatorio del cliente pasa al 20 nov." });
-  // Ya respondió: deja de esperar, y vuelve a tocarnos a nosotros.
+  // SIGUE EN ESPERA: se recuerda otro día...
+  assert.deepEqual(alPosponer({ recordarEl: "2026-11-20", hoy: HOY }), { campos: { recordar_el: "2026-11-20" }, detalle: "Sigue en espera. Se recuerda el 20 nov." });
+  assert.ok(alPosponer({ recordarEl: "2026-11-01", hoy: HOY }).error);
+  // ...o sin recordatorio: el que estaba para revisar deja de avisar.
+  const estacionar = alPosponer({ hoy: HOY });
+  assert.deepEqual(estacionar, { campos: { recordar_el: null }, detalle: "Sigue en espera, sin recordatorio." });
+  assert.equal(estadoDelLead({ ...esperando, ...estacionar.campos }, [], HOY).clase, "esperando");
+  // RETOMAR: deja de estar en espera, y vuelve a estar en curso.
   const r = alResponder(esperando, HOY);
   assert.deepEqual(r.campos, { espera_desde: null, espera_que: null, recordar_el: null });
-  assert.equal(r.detalle, "El cliente respondió, después de 5 días.");
-  assert.equal(estadoDelLead({ ...esperando, ...r.campos }, [], HOY).clase, "sin_paso", "y pide el próximo paso");
+  assert.equal(r.detalle, "Se retoma, después de 5 días en espera.");
+  assert.equal(enEspera(estadoDelLead({ ...esperando, ...r.campos }, [], HOY)), false);
 });
 
 test("las dos salidas: aprobado sale del pipeline, perdido pide el motivo", () => {
@@ -168,30 +178,34 @@ test("las dos salidas: aprobado sale del pipeline, perdido pide el motivo", () =
   assert.deepEqual(alReabrir().campos, { resultado: null, motivo_perdida: null });
 });
 
-test("los avisos son tres y solo de lo que se persigue; primero lo que más aprieta", () => {
+test("los avisos son DOS y solo de lo que se persigue: toca revisar uno en espera, o venció algo con fecha", () => {
   const leads = [
     lead({ id: 1, nombre: "Al día" }),
     lead({ id: 2, nombre: "RES ZULETA", responsable_id: 7 }),
     lead({ id: 3, nombre: "CHRONIX", espera_desde: "2026-11-06", recordar_el: HOY }),
-    lead({ id: 4, nombre: "MINDKIDS" }),
+    lead({ id: 4, nombre: "MINDKIDS" }),                                                                  // sin nada con fecha
     lead({ id: 5, nombre: "Espera tranquila", espera_desde: "2026-11-10", recordar_el: "2026-11-17" }),
     lead({ id: 6, nombre: "Diners Aereo GYE", resultado: "ganado" }),
-    lead({ id: 7, nombre: "Otro para insistir", espera_desde: "2026-11-01", recordar_el: "2026-11-10" }),
+    lead({ id: 7, nombre: "Otro para revisar", espera_desde: "2026-11-01", recordar_el: "2026-11-10" }),
+    lead({ id: 8, nombre: "Estacionado", espera_desde: "2026-10-01", recordar_el: null }),               // en espera, sin recordatorio
   ];
   const tareas = [
     tarea({ id: 10, lead_id: 1, due_date: "2026-11-15" }),
     tarea({ id: 11, lead_id: 2, title: "gestionar reunion", due_date: "2026-10-05" }),
     // La base puede devolver el id del lead como texto.
     tarea({ id: 12, lead_id: "6", title: "Revisión Contrato", due_date: "2026-10-07" }),
+    tarea({ id: 13, lead_id: 4, title: "Cotizar" }),
   ];
   const avisos = avisosDelPipeline({ leads, tareas, hoy: HOY });
   assert.deepEqual(avisos.map(a => [a.clase, a.nombre]), [
-    ["insistir", "Otro para insistir"],   // 10 días sin respuesta
-    ["insistir", "CHRONIX"],              // 5 días
+    ["insistir", "Otro para revisar"],    // tocaba ayer
+    ["insistir", "CHRONIX"],              // toca hoy
     ["vencido", "RES ZULETA"],
-    ["sin_paso", "MINDKIDS"],
   ]);
+  assert.equal(avisos[0].texto, "En espera hace 10 días · tocaba revisarlo hace 1 día");
   assert.equal(avisos[2].texto, "«gestionar reunion» · atrasado 37 días");
+  // «SIN PRÓXIMO PASO» YA NO AVISA, ni el que está estacionado: no están en falta.
+  assert.equal(avisos.some(a => ["MINDKIDS", "Estacionado", "Espera tranquila"].includes(a.nombre)), false);
   // El aprobado tiene una tarea vencida y no avisa acá: ya no es del pipeline.
   assert.equal(avisos.some(a => a.nombre === "Diners Aereo GYE"), false);
   // Cada quien ve los suyos; el Director, todos.
@@ -220,12 +234,13 @@ test("el servidor arma los mismos avisos que la pantalla: el correo no puede dec
   assert.equal(api.esMiAviso({ responsable_id: 7, created_by: 1 }, "7"), esMiAviso({ responsable_id: 7, created_by: 1 }, "7"));
 });
 
-test("el correo de la mañana lleva del pipeline a quién insistirle y qué lead quedó sin paso", async () => {
+test("el correo de la mañana lleva del pipeline lo que está en espera y hoy toca revisar, y nada más", async () => {
   const { armarResumen } = await import("../api/_resumen.js");
   const pipeline = [
-    { clase: "insistir", lead_id: 3, nombre: "CHRONIX", texto: "Insistir con el cliente: sin respuesta hace 5 días", responsable_id: 2, created_by: 2 },
+    { clase: "insistir", lead_id: 3, nombre: "CHRONIX", texto: "En espera hace 5 días · tocaba revisarlo hoy", responsable_id: 2, created_by: 2 },
     { clase: "vencido", lead_id: 2, nombre: "RES ZULETA", texto: "«gestionar reunion» · atrasado 37 días", responsable_id: 2, created_by: 2 },
-    { clase: "sin_paso", lead_id: 4, nombre: "MINDKIDS", texto: "Sin próximo paso", responsable_id: 1, created_by: 1 },
+    // Una clase de antes, por si llegara: ya no se manda.
+    { clase: "sin_paso", lead_id: 4, nombre: "MINDKIDS", texto: "Sin actividades abiertas", responsable_id: 1, created_by: 1 },
   ];
   const usuarios = [
     { id: 1, nombre: "Hernan Cueva", email: "director@ejemplo.test", rol: "owner", activo: true },
@@ -235,11 +250,11 @@ test("el correo de la mañana lleva del pipeline a quién insistirle y qué lead
   const sobres = armarResumen({ tareas: [], usuarios, leads: [], accesos: [], hoy: HOY, pipeline });
   const de = id => sobres.find(s => s.usuario.id === id);
   // El Director ve los de toda la oficina.
-  assert.deepEqual(de(1).pipeline.map(a => a.nombre), ["CHRONIX", "MINDKIDS"]);
-  // Quien lleva el lead recibe el suyo, aunque no tenga ninguna tarea para hoy.
+  assert.deepEqual(de(1).pipeline.map(a => a.nombre), ["CHRONIX"]);
+  // Quien lleva el proyecto recibe el suyo, aunque no tenga ninguna tarea para hoy.
   assert.deepEqual(de(2).pipeline.map(a => a.nombre), ["CHRONIX"]);
-  // El paso vencido no se repite: es una tarea, y ya sale en ATRASADO.
-  assert.equal(sobres.some(s => s.pipeline.some(a => a.clase === "vencido")), false);
+  // El paso vencido no se repite: es una tarea, y ya sale en ATRASADO. Y «sin próximo paso» no avisa más.
+  assert.equal(sobres.some(s => s.pipeline.some(a => a.clase !== "insistir")), false);
   // A quien no tiene nada no se le manda un correo vacío.
   assert.equal(de(3), undefined);
   assert.deepEqual(armarResumen({ tareas: [], usuarios, leads: [], accesos: [], hoy: HOY }), [], "sin avisos del pipeline no se rompe");
@@ -268,9 +283,11 @@ test("el pipeline se lee por tipo, y dentro de cada tipo cuántos hay en cada et
 
 test("el panel de avisos junta lo activo de cada módulo, con su cuenta y a dónde lleva", () => {
   const pipeline = [
-    { clase: "insistir", nombre: "CHRONIX", texto: "Insistir con el cliente: sin respuesta hace 5 días" },
-    { clase: "sin_paso", nombre: "MINDKIDS", texto: "Sin próximo paso" },
-    { clase: "sin_paso", nombre: "Grupo Global", texto: "Sin próximo paso" },
+    { clase: "insistir", nombre: "CHRONIX", texto: "En espera hace 5 días · tocaba revisarlo hoy" },
+    { clase: "vencido", nombre: "MINDKIDS", texto: "«Cotizar» · atrasado 2 días" },
+    { clase: "vencido", nombre: "Grupo Global", texto: "«Plano» · atrasado 1 día" },
+    // Una clase de antes: el panel ya no la muestra.
+    { clase: "sin_paso", nombre: "Megalabs", texto: "Sin actividades abiertas" },
   ];
   const lista = avisosDelTablero({
     pipeline, compras: [{ descripcion: "Andamios" }, { descripcion: "Gypsum" }], devueltas: 1,
@@ -278,12 +295,13 @@ test("el panel de avisos junta lo activo de cada módulo, con su cuenta y a dón
   });
   assert.deepEqual(lista.map(a => [a.clave, a.vista, a.cuenta, a.tono]), [
     ["pipeline-insistir", "leads", 1, "peligro"],
-    ["pipeline-sin_paso", "leads", 2, "atencion"],
+    ["pipeline-vencido", "leads", 2, "peligro"],
     ["compras", "compras", 2, "atencion"],
     ["observaciones", "observaciones", 2, "peligro"],
   ]);
   // Con uno solo dice qué pasa con él; con varios, cuáles son.
-  assert.equal(lista[0].detalle, "CHRONIX: Insistir con el cliente: sin respuesta hace 5 días");
+  assert.equal(lista[0].detalle, "CHRONIX: En espera hace 5 días · tocaba revisarlo hoy");
+  assert.equal(lista[0].texto, "proyecto en espera para revisar");
   assert.equal(lista[1].detalle, "MINDKIDS · Grupo Global");
   assert.equal(lista[2].detalle, "1 que compras te devolvió");
   assert.equal(lista[3].detalle, "1 urgente");

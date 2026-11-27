@@ -143,7 +143,9 @@ test("el correo lleva lo mismo que el enlace: cada punto con su descripción, su
   assert.match(cuerpo, /1 de 3 puntos listos/);
   assert.match(cuerpo, /Cotizar ventanería/); assert.match(cuerpo, /Aluminio negro, vidrio templado/);
   assert.match(cuerpo, /Listo · 9 de noviembre de 2026/);
-  assert.match(cuerpo, /Hecho de nuestro lado · esperando respuesta/);
+  // Un punto en espera se le dice así: ya no «hecho de nuestro lado», que no siempre es verdad.
+  assert.match(cuerpo, /En espera/);
+  assert.doesNotMatch(cuerpo, /Hecho de nuestro lado/);
   assert.match(cuerpo, /Llegaron dos cotizaciones, falta la de Alumina\./);
   assert.match(cuerpo, /Actualizado el 12 de noviembre de 2026/);
   assert.match(cuerpo, /Pendiente/);

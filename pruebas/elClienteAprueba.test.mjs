@@ -130,7 +130,7 @@ test("en el checklist se le pide adentro de lo que ve el cliente, y la fila dice
   assert.match(caja, /className="avisar-de-nuevo" onClick=\{\(\) => onPedirAprobacion\?\.\("avisar"\)\}/);
   assert.match(caja, /className="no-pedir-aprobacion" onClick=\{\(\) => hacer\(\(\) => pedirAprobacion\(item, false, currentUser\)\)\}/);
   // La fila: espera, aprobado u observaciones; solo si el cliente ve el punto.
-  assert.match(lista, /\{laVeElCliente && aprobacion && \(\s+<span className="aprobacion-del-cliente" data-estado=\{aprobacion\.estado\}/);
+  assert.match(lista, /laVeElCliente && aprobacion \? \(\s+<span className="aprobacion-del-cliente" data-estado=\{aprobacion\.estado\}/);
   assert.match(lista, /aprobacion=\{aprobaciones\[item\.id\] \|\| null\} sinAprobacion=\{sinAprobacion\}/);
   // Guardar: pedir de nuevo borra la respuesta anterior, y queda en el historial del punto.
   const datos = codigoDe("../src/modules/leads/proyecto.js");

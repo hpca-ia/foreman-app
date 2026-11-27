@@ -128,8 +128,8 @@ export default function Bandeja({
           rojo, sin darla por terminada. */}
       {onEsperar && (
         <button disabled={ocupado} onClick={() => hacer(() => onEsperar(t, !t.espera))} aria-pressed={!!t.espera}
-          title={t.espera ? "Vuelve a depender de mí" : "Lo nuestro ya se hizo: ahora depende de otro"}
-          style={chip(false)}><Hourglass size={11} /> {t.espera ? "Ya no espera" : "Espera a un tercero"}</button>
+          title={t.espera ? "Vuelve a estar en curso" : "Se hizo lo que tocaba y todavía no hay paso nuevo"}
+          style={chip(false)}><Hourglass size={11} /> {t.espera ? "Ya no está en espera" : "Dejar en espera"}</button>
       )}
       {conDescartar && puedeDescartar(t) && (
         <button disabled={ocupado} onClick={() => hacer(() => onDescartar(t))} title="Se cierra sin haberse hecho"
@@ -176,7 +176,7 @@ export default function Bandeja({
               {/* De quién es, cuando no es mía: en lo que encargué es lo que más importa. */}
               {!mia && quien && <span style={{ color: colors.inkSoft, fontWeight: 600 }}>· {quien}</span>}
               {t.hora && !hecha && <span>· {t.hora}</span>}
-              {t.espera && !hecha && <span style={{ color: colors.warning }}>· espera a un tercero</span>}
+              {t.espera && !hecha && <span style={{ color: colors.warning }}>· en espera</span>}
               {hecha && <span>· {t.descartada ? "ya no va" : "hecha"}{t.hecha_por ? ` · ${t.hecha_por}` : ""}</span>}
               {comentarios[t.id] > 0 && <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>· <MessageSquare size={10} /> {comentarios[t.id]}</span>}
             </div>

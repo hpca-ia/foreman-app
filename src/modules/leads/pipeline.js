@@ -170,84 +170,87 @@ export function proximoPaso(tareas = []) {
 }
 
 /**
- * En qué está un lead que se persigue. Una sola de cinco:
+ * EN QUÉ ESTÁ UN PROYECTO QUE SE PERSIGUE.
  *
- *   insistir  · espera al cliente y llegó el día de recordarlo
- *   esperando · espera al cliente y todavía no toca
- *   vencido   · su próximo paso ya pasó
- *   al_dia    · tiene próximo paso con fecha
- *   sin_paso  · ni una cosa ni la otra: nadie lo va a volver a mirar
+ * Hernán, 26/11/2026: «El workflow del pipeline es confuso». En la base, ese
+ * día: de nueve proyectos, cinco en «Insistir con el cliente» en rojo —hace
+ * 15, 15, 9, 8 y 2 días—, y «Insistí hoy» sin usar una sola vez. La regla de
+ * antes exigía que todo proyecto tuviera un paso con fecha o esperara al
+ * cliente; el que no, avisaba. La espera se usaba para estacionar, y el aviso
+ * había dejado de decir algo.
  *
- * Esperar al cliente manda sobre lo demás: mientras la pelota está del otro
- * lado, un paso nuestro atrasado no es lo que hay que resolver.
+ * Ahora un proyecto está EN CURSO o EN ESPERA —lo mismo que cada una de sus
+ * actividades—, y avisa solo por dos cosas: venció algo que tenía fecha, o
+ * llegó el día que alguien pidió que se lo recuerden.
+ *
+ *   EN ESPERA
+ *     insistir  · llegó el día de revisarlo: el que se pidió al dejarlo    → AVISA
+ *     esperando · estacionado: sin recordatorio, o todavía no le toca
+ *   EN CURSO
+ *     vencido   · algo que tenía fecha ya pasó                             → AVISA
+ *     al_dia    · tiene algo con fecha por delante
+ *     sin_paso  · actividades sin fecha, o ninguna. No es una falta.
+ *
+ * (Los nombres de las clases son los de antes: el panel, la bandeja y el
+ * correo de la mañana las leen por ese nombre.)
+ *
+ * La espera manda sobre lo demás: mientras la pelota está del otro lado, un
+ * paso nuestro atrasado no es lo que hay que resolver.
  */
 export function estadoDelLead(lead, tareas = [], hoy = hoyISO()) {
   const paso = proximoPaso(tareas);
+  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t)).length;
   if (lead?.espera_desde) {
-    // Sin día de recordatorio se recuerda ya: lo que no puede pasar es que
-    // quede esperando para siempre.
-    const toca = !lead.recordar_el || soloDia(lead.recordar_el) <= hoy;
+    // SIN RECORDATORIO ESTÁ ESTACIONADO, NO EN FALTA. Antes «sin día se recuerda
+    // ya», y todo lo que se dejaba esperando volvía en rojo.
+    const toca = !!lead.recordar_el && soloDia(lead.recordar_el) <= hoy;
     return {
-      clase: toca ? "insistir" : "esperando", paso,
+      clase: toca ? "insistir" : "esperando", paso, abiertas,
       dias: Math.max(0, diasEntre(lead.espera_desde, hoy)),
       que: lead.espera_que || null, recordar_el: lead.recordar_el ? soloDia(lead.recordar_el) : null,
+      // Hace cuánto tocaba revisarlo.
+      ...(toca ? { tocaba: Math.max(0, diasEntre(lead.recordar_el, hoy)) } : {}),
     };
   }
   if (paso?.due_date) {
     const faltan = diasEntre(hoy, paso.due_date);
-    return { clase: faltan < 0 ? "vencido" : "al_dia", paso, faltan };
+    return { clase: faltan < 0 ? "vencido" : "al_dia", paso, abiertas, faltan };
   }
-  return { clase: "sin_paso", paso };
+  return { clase: "sin_paso", paso, abiertas };
 }
 
-/** Lo que dice la tarjeta del lead, en una línea. */
+/** ¿Está en espera? Es uno de los dos estados que se ven; el otro es en curso. */
+export const enEspera = estado => estado?.clase === "insistir" || estado?.clase === "esperando";
+
+/** Lo que dice la tarjeta del proyecto, en una línea. */
 export function loQueDice(estado) {
   const paso = estado.paso?.title ? `«${estado.paso.title}»` : "";
-  if (estado.clase === "insistir") return `Insistir con el cliente: sin respuesta hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`;
-  if (estado.clase === "esperando") {
-    return `Esperando al cliente hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`
-      + (estado.recordar_el ? ` · se recuerda el ${diaCorto(estado.recordar_el)}` : "");
+  if (enEspera(estado)) {
+    const desde = `En espera hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`;
+    if (estado.clase === "insistir") return `${desde} · tocaba revisarlo ${estado.tocaba ? `hace ${dias(estado.tocaba)}` : "hoy"}`;
+    return desde + (estado.recordar_el ? ` · se recuerda el ${diaCorto(estado.recordar_el)}` : "");
   }
   if (estado.clase === "vencido") return `${paso} · atrasado ${dias(-estado.faltan)}`;
   if (estado.clase === "al_dia") {
     return `${paso} · ${estado.faltan === 0 ? "hoy" : estado.faltan === 1 ? "mañana" : `en ${dias(estado.faltan)}`}`;
   }
-  return paso ? `${paso} · sin fecha` : "Sin próximo paso";
-}
-
-/**
- * POR QUÉ UN PROYECTO NO TIENE PRÓXIMO PASO, dicho entero.
- *
- * La tarjeta decía «"Revision de Electrica" · sin fecha», y Hernán preguntó
- * qué hacía ese cuadro (17/11/2026): nombraba un solo punto, como si el
- * problema fuera ese, cuando eran los ocho abiertos los que no tenían fecha.
- * Acá se dice la cuenta, por qué importa y qué hace el botón.
- *
- * @returns null si no es el caso, o { dice, ayuda, boton }
- */
-export function explicarSinPaso(estado, tareas = []) {
-  if (estado?.clase !== "sin_paso") return null;
-  const ayuda = "Sin un paso con fecha nadie lo vuelve a mirar: FOREMAN lo recuerda el día que le pongas.";
-  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t)).length;
-  const titulo = estado.paso?.title || "";
-  if (!titulo) return { dice: "No queda nada abierto en el checklist.", ayuda, boton: "Poner el próximo paso" };
-  return {
-    dice: abiertas > 1 ? `Ninguno de los ${abiertas} puntos abiertos tiene fecha.` : `«${titulo}» no tiene fecha.`,
-    ayuda, boton: `Ponerle fecha a «${titulo}»`,
-  };
+  const n = estado.abiertas ?? (estado.paso ? 1 : 0);
+  return n ? `${n} ${n === 1 ? "actividad abierta" : "actividades abiertas"}, sin fecha` : "Sin actividades abiertas";
 }
 
 // ─── Los avisos ────────────────────────────────────────────────────────────
 
-const ORDEN_DE_AVISOS = { insistir: 0, vencido: 1, sin_paso: 2 };
+// DOS AVISOS, Y NADA MÁS. «Sin próximo paso con fecha» ya no es uno: un
+// proyecto con actividades sin fecha, o estacionado, no está en falta.
+const ORDEN_DE_AVISOS = { insistir: 0, vencido: 1 };
 // Dentro de cada clase, primero el que lleva más días así.
-const cuantoAprieta = e => (e.clase === "insistir" ? e.dias : e.clase === "vencido" ? -e.faltan : 0);
+const cuantoAprieta = e => (e.clase === "insistir" ? e.tocaba || 0 : e.clase === "vencido" ? -e.faltan : 0);
 
 /**
- * Los avisos del pipeline: los leads que hoy piden que alguien haga algo.
+ * Los avisos del pipeline: los proyectos que hoy piden que alguien haga algo.
  *
- * Tres y nada más —llegó el día de insistir, el próximo paso está vencido, no
- * tiene próximo paso ni espera—, y solo de los que se persiguen. Es la misma
+ * Dos y nada más —llegó el día que se pidió para revisar uno que está en
+ * espera, o venció algo que tenía fecha—, y solo de los que se persiguen. Es la misma
  * lista para la pantalla del pipeline, el panel del dashboard y el correo de
  * la mañana: no pueden decir cosas distintas.
  *
@@ -281,45 +284,40 @@ export const esMiAviso = (aviso, usuarioId, veTodo = false) =>
 // ─── Lo que se guarda al tocar ─────────────────────────────────────────────
 // Cada una devuelve los campos del lead y lo que queda escrito en su historia.
 
-/** En cuánto se recuerda, de un toque. La tercera opción es elegir la fecha. */
+/** En cuánto se recuerda, de un toque. Las otras dos opciones: elegir la fecha, o sin recordatorio. */
 export const RECORDAR_EN = [{ dias: 3, label: "En 3 días" }, { dias: 7, label: "En una semana" }];
+
+/** De quién se espera, de un toque: es lo que se escribe en «qué se espera». */
+export const SE_ESPERA = ["Respuesta del cliente", "Un proveedor", "Lo retomamos más adelante"];
 
 const SIN_ESPERA = { espera_desde: null, espera_que: null, recordar_el: null };
 
-/** Queda esperando la respuesta del cliente, con el día en que se recuerda. */
-export function alEsperar({ que, recordarEl, hoy = hoyISO() }) {
+/**
+ * DEJAR EL PROYECTO EN ESPERA. Qué se espera —y de quién— es opcional, y el
+ * recordatorio también: sin día queda estacionado, y no avisa.
+ */
+export function alEsperar({ que, recordarEl = null, hoy = hoyISO() }) {
   const dia = soloDia(recordarEl);
-  if (!dia) return { error: "Decí cuándo te lo recuerdo." };
-  if (dia < hoy) return { error: "El recordatorio no puede ser de un día que ya pasó." };
+  if (dia && dia < hoy) return { error: "El recordatorio no puede ser de un día que ya pasó." };
   const texto = String(que || "").trim();
   return {
-    campos: { espera_desde: hoy, espera_que: texto || null, recordar_el: dia },
-    detalle: `Queda esperando respuesta del cliente${texto ? `: ${texto}` : ""}. Se recuerda el ${diaCorto(dia)}.`,
+    campos: { espera_desde: hoy, espera_que: texto || null, recordar_el: dia || null },
+    detalle: `Queda en espera${texto ? `: ${texto}` : ""}. ${dia ? `Se recuerda el ${diaCorto(dia)}.` : "Sin recordatorio."}`,
   };
 }
 
-/** El cliente respondió: deja de esperar, y ahora nos toca a nosotros. */
+/** Se retoma: deja de estar en espera, y vuelve a estar en curso. */
 export function alResponder(lead, hoy = hoyISO()) {
   const n = lead?.espera_desde ? Math.max(0, diasEntre(lead.espera_desde, hoy)) : 0;
-  return { campos: { ...SIN_ESPERA }, detalle: `El cliente respondió${n ? `, después de ${dias(n)}` : ""}.` };
+  return { campos: { ...SIN_ESPERA }, detalle: `Se retoma${n ? `, después de ${dias(n)} en espera` : ""}.` };
 }
 
-/** Se insistió hoy: queda escrito, y se vuelve a recordar. Sigue esperando desde el mismo día. */
-export function alInsistir(lead, { recordarEl, hoy = hoyISO() }) {
+/** Sigue en espera: se corre el recordatorio a otro día, o se le quita. */
+export function alPosponer({ recordarEl = null, hoy = hoyISO() }) {
   const dia = soloDia(recordarEl);
-  if (!dia || dia <= hoy) return { error: "Decí cuándo te lo vuelvo a recordar: tiene que ser más adelante." };
-  const n = lead?.espera_desde ? Math.max(0, diasEntre(lead.espera_desde, hoy)) : 0;
-  return {
-    campos: { recordar_el: dia },
-    detalle: `Insistió con el cliente${n ? `: sin respuesta hace ${dias(n)}` : ""}. Se vuelve a recordar el ${diaCorto(dia)}.`,
-  };
-}
-
-/** Correr el recordatorio sin haber insistido. */
-export function alPosponer({ recordarEl, hoy = hoyISO() }) {
-  const dia = soloDia(recordarEl);
-  if (!dia || dia < hoy) return { error: "Elegí un día de hoy en adelante." };
-  return { campos: { recordar_el: dia }, detalle: `El recordatorio del cliente pasa al ${diaCorto(dia)}.` };
+  if (!dia) return { campos: { recordar_el: null }, detalle: "Sigue en espera, sin recordatorio." };
+  if (dia < hoy) return { error: "Elegí un día de hoy en adelante." };
+  return { campos: { recordar_el: dia }, detalle: `Sigue en espera. Se recuerda el ${diaCorto(dia)}.` };
 }
 
 /** Pasar a otra etapa: cualquiera de las de su tipo, sin orden obligado. */

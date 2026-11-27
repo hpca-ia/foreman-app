@@ -91,7 +91,7 @@ const bloqueDelPipeline = lista => (lista.length ? `
   </div>`).join("")}
   ${lista.length > 10 ? `<div style="font-size:11.5px;color:#9CA3AF;margin-top:4px">…y ${lista.length - 10} más.</div>` : ""}
   <div style="font-size:11.5px;color:#6B7280;margin-top:5px">
-    En el Pipeline, cada lead tiene sus tres salidas de un toque: ya respondió, insistí hoy, o recordarme otro día.
+    En el Pipeline, cada uno se resuelve de un toque: «Retomar» si ya se movió, o «Sigue en espera», con otro día o sin recordatorio.
   </div>` : "");
 
 /**
@@ -268,7 +268,7 @@ function cuerpoDelCorreo(s) {
         </tr>`).join("")}
       </table>` : "",
     s.esAdmin && s.sinDueno.length ? bloque(`SIN RESPONSABLE · ${s.sinDueno.length}`, "#B91C1C", s.sinDueno.slice(0, 12)) : "",
-    // Los leads que hoy piden algo: insistirle al cliente, o ponerles próximo paso.
+    // Los proyectos que están en espera y hoy toca revisar: es el día que alguien pidió.
     bloqueDelPipeline(s.pipeline || []),
     // Lo que el cliente no aprobó a tiempo, a quien lleva el proyecto o tiene el punto.
     bloqueDeAprobaciones(s.aprobaciones || []),

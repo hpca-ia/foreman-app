@@ -5,9 +5,10 @@
 // pruebas/pipeline.test.mjs le da las mismas entradas a las dos y exige la
 // misma salida: si se toca una, se toca la otra.
 //
-// Qué es un aviso: un lead que se persigue y hoy pide que alguien haga algo
-// —llegó el día de insistirle al cliente, su próximo paso está vencido, o no
-// tiene próximo paso ni está esperando al cliente—.
+// Qué es un aviso: un proyecto que se persigue y hoy pide que alguien haga
+// algo. Dos y nada más: llegó el día que se pidió para revisar uno que está
+// en espera, o venció algo que tenía fecha. «Sin próximo paso» ya no avisa, y
+// el que está en espera sin recordatorio está estacionado, no en falta.
 
 const soloDia = f => String(f || "").slice(0, 10);
 const alMediodia = f => new Date(`${soloDia(f)}T12:00:00`);
@@ -35,37 +36,42 @@ function proximoPaso(tareas = []) {
 
 function estadoDelLead(lead, tareas = [], hoy = hoyISO()) {
   const paso = proximoPaso(tareas);
+  const abiertas = tareas.filter(t => abierta(t) && !esDeCompras(t)).length;
   if (lead?.espera_desde) {
-    const toca = !lead.recordar_el || soloDia(lead.recordar_el) <= hoy;
+    const toca = !!lead.recordar_el && soloDia(lead.recordar_el) <= hoy;
     return {
-      clase: toca ? "insistir" : "esperando", paso,
+      clase: toca ? "insistir" : "esperando", paso, abiertas,
       dias: Math.max(0, diasEntre(lead.espera_desde, hoy)),
       que: lead.espera_que || null, recordar_el: lead.recordar_el ? soloDia(lead.recordar_el) : null,
+      ...(toca ? { tocaba: Math.max(0, diasEntre(lead.recordar_el, hoy)) } : {}),
     };
   }
   if (paso?.due_date) {
     const faltan = diasEntre(hoy, paso.due_date);
-    return { clase: faltan < 0 ? "vencido" : "al_dia", paso, faltan };
+    return { clase: faltan < 0 ? "vencido" : "al_dia", paso, abiertas, faltan };
   }
-  return { clase: "sin_paso", paso };
+  return { clase: "sin_paso", paso, abiertas };
 }
+
+const enEspera = estado => estado?.clase === "insistir" || estado?.clase === "esperando";
 
 function loQueDice(estado) {
   const paso = estado.paso?.title ? `«${estado.paso.title}»` : "";
-  if (estado.clase === "insistir") return `Insistir con el cliente: sin respuesta hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`;
-  if (estado.clase === "esperando") {
-    return `Esperando al cliente hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`
-      + (estado.recordar_el ? ` · se recuerda el ${diaCorto(estado.recordar_el)}` : "");
+  if (enEspera(estado)) {
+    const desde = `En espera hace ${dias(estado.dias)}${estado.que ? ` · ${estado.que}` : ""}`;
+    if (estado.clase === "insistir") return `${desde} · tocaba revisarlo ${estado.tocaba ? `hace ${dias(estado.tocaba)}` : "hoy"}`;
+    return desde + (estado.recordar_el ? ` · se recuerda el ${diaCorto(estado.recordar_el)}` : "");
   }
   if (estado.clase === "vencido") return `${paso} · atrasado ${dias(-estado.faltan)}`;
   if (estado.clase === "al_dia") {
     return `${paso} · ${estado.faltan === 0 ? "hoy" : estado.faltan === 1 ? "mañana" : `en ${dias(estado.faltan)}`}`;
   }
-  return paso ? `${paso} · sin fecha` : "Sin próximo paso";
+  const n = estado.abiertas ?? (estado.paso ? 1 : 0);
+  return n ? `${n} ${n === 1 ? "actividad abierta" : "actividades abiertas"}, sin fecha` : "Sin actividades abiertas";
 }
 
-const ORDEN_DE_AVISOS = { insistir: 0, vencido: 1, sin_paso: 2 };
-const cuantoAprieta = e => (e.clase === "insistir" ? e.dias : e.clase === "vencido" ? -e.faltan : 0);
+const ORDEN_DE_AVISOS = { insistir: 0, vencido: 1 };
+const cuantoAprieta = e => (e.clase === "insistir" ? e.tocaba || 0 : e.clase === "vencido" ? -e.faltan : 0);
 
 /** @returns [{ clase, lead_id, nombre, texto, responsable_id, created_by }] */
 export function avisosDelPipeline({ leads = [], tareas = [], hoy = hoyISO() }) {

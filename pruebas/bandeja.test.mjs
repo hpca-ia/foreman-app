@@ -88,7 +88,7 @@ test("lo que nadie tomó es de quien lo escribió, y del Director todo", () => {
   assert.deepEqual(ids(bandeja({ tareas: [t({ title: "x", assignee_id: "1" })], usuarioId: 1, hoy: HOY }).meToca), { sinFecha: ["x"] });
 });
 
-test("un lead que espera al cliente está en «Espero de otros»; el día del recordatorio pasa a «Me toca»", () => {
+test("un proyecto en espera está en «Espero de otros»; el día que se pidió recordarlo pasa a «Me toca»", () => {
   const leads = [
     { id: 18, nombre: "CHRONIX", resultado: null, responsable_id: YO, espera_desde: "2026-11-06", espera_que: "que apruebe el presupuesto", recordar_el: HOY },
     { id: 21, nombre: "MINDKIDS", resultado: null, responsable_id: YO, espera_desde: "2026-11-10", recordar_el: "2026-11-17" },
@@ -99,7 +99,8 @@ test("un lead que espera al cliente está en «Espero de otros»; el día del re
   const b = bandeja({ tareas: [], usuarioId: YO, leads, hoy: HOY });
   const insistir = b.meToca.find(g => g.clave === "insistir");
   assert.deepEqual(insistir.leads.map(x => [x.lead.nombre, x.texto]),
-    [["CHRONIX", "Insistir con el cliente: sin respuesta hace 5 días · que apruebe el presupuesto"]]);
+    [["CHRONIX", "En espera hace 5 días · que apruebe el presupuesto · tocaba revisarlo hoy"]]);
+  assert.deepEqual([insistir.titulo, b.espero.find(g => g.clave === "clientes").titulo], ["Proyectos en espera: toca revisar", "Proyectos en espera"]);
   assert.deepEqual(b.espero.find(g => g.clave === "clientes").leads.map(x => x.lead.nombre), ["MINDKIDS"]);
   assert.deepEqual(b.cuenta, { meToca: 1, espero: 1, vencidas: 0, hoy: 0, encargadasVencidas: 0 });
   // El Director ve los de toda la oficina.

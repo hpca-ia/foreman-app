@@ -17,8 +17,8 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 //
 // Se lee por TIPO de lead —Diseño, Construcción, Diseño y construcción—, que
 // es lo que decide por qué etapas pasa cada uno. Cada lead está en una sola
-// etapa, que se elige de un desplegable en su misma tarjeta, y dice qué sigue:
-// su próximo paso con fecha, o desde cuándo espera al cliente.
+// etapa, que se elige de un desplegable en su misma tarjeta, y dice su estado:
+// en curso —con lo próximo que tiene fecha— o en espera, y desde cuándo.
 //
 // Lo aprobado ya no está acá: vive en Control y se lista en «En marcha».
 //
@@ -85,8 +85,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const perdidos = mios.filter(estaPerdido);
   const tareasDe = id => tareas.filter(t => String(t.lead_id) === String(id));
 
-  // Los tres avisos, y nada más: llegó el día de insistir, el próximo paso
-  // está vencido, o no tiene próximo paso ni espera. Es la misma lista que
+  // Los dos avisos, y nada más: llegó el día que se pidió para revisar uno
+  // que está en espera, o venció algo que tenía fecha. Es la misma lista que
   // arma el panel del dashboard y el correo de la mañana.
   const avisos = avisosDelPipeline({ leads: perseguidos, tareas, hoy });
   const claseDeAviso = Object.fromEntries(avisos.map(a => [String(a.lead_id), a.clase]));
@@ -122,9 +122,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
       {avisos.length > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
           {[
-            ["insistir", "para insistir con el cliente", Hourglass, colors.danger, colors.dangerSoft, colors.dangerBorder],
-            ["vencido", "con el próximo paso vencido", AlertTriangle, colors.danger, colors.dangerSoft, colors.dangerBorder],
-            ["sin_paso", "sin próximo paso con fecha", AlertTriangle, colors.warning, colors.warningSoft, colors.warningBorder],
+            ["insistir", "en espera: toca revisar", Hourglass, colors.danger, colors.dangerSoft, colors.dangerBorder],
+            ["vencido", "con algo vencido", AlertTriangle, colors.danger, colors.dangerSoft, colors.dangerBorder],
           ].filter(([clase]) => cuantos(clase) > 0).map(([clase, txt, Icono, color, bg, borde]) => (
             <button key={clase} onClick={() => setSoloAviso(a => (a === clase ? null : clase))}
               style={{ display: "flex", alignItems: "center", gap: 8, background: bg, border: `1.5px solid ${soloAviso === clase ? color : borde}`,
@@ -211,7 +210,7 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                     const avance = avanceDe(tareasDe(l.id));
                     return (
                       <div key={l.id} className="lead-tarjeta" onClick={() => setAbierto(l)}
-                        style={{ borderLeft: `3px solid ${clase === "sin_paso" ? colors.warning : clase ? colors.danger : g.color}` }}>
+                        style={{ borderLeft: `3px solid ${clase ? colors.danger : g.color}` }}>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, overflowWrap: "anywhere" }}>{l.nombre}</div>
                           <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 1 }}>

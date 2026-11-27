@@ -75,7 +75,7 @@ export function armarResumen(d) {
   const deCompras = todas.filter(t => esDeCompras(t) && ABIERTA(t));
   const abiertas = tareas.filter(ABIERTA);
   const nombreDe = id => d.usuarios.find(x => x.id === id)?.nombre || "";
-  const delPipeline = (d.pipeline || []).filter(a => a.clase === "insistir" || a.clase === "sin_paso");
+  const delPipeline = (d.pipeline || []).filter(a => a.clase === "insistir");
   const cerradasAyer = tareas.filter(t => {
     const cuando = String(t.updated_at || "").slice(0, 10);
     return t.status === "listo" && cuando >= desde && cuando < hoy;

@@ -4,14 +4,13 @@ import { colors } from "../../theme/colors";
 import { inputStyle } from "../../components/ui/Input";
 import { HORAS } from "../../theme/constants";
 import {
-  TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, estadoDelLead, loQueDice, explicarSinPaso, sePersigue, estaAprobado, estaPerdido,
-  alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, alEsperar, alResponder, alInsistir, alPosponer,
-  RECORDAR_EN, hoyISO, sumarDias,
+  TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, estadoDelLead, enEspera, loQueDice, sePersigue, estaAprobado, estaPerdido,
+  alCambiarEtapa, alCambiarTipo, alAprobar, alPerder, alReabrir, alEsperar, alResponder, alPosponer,
+  RECORDAR_EN, SE_ESPERA, hoyISO, sumarDias,
 } from "./pipeline";
-import { aplicar, agregarTarea, ponerFecha } from "./proyecto";
-import { comoActividad } from "./tareasDelProyecto";
+import { aplicar, agregarTarea } from "./proyecto";
 
-// EN QUÉ ESTÁ UN LEAD, Y LO QUE SE LE PUEDE HACER DE UN TOQUE.
+// EN QUÉ ESTÁ UN PROYECTO DEL PIPELINE, Y LO QUE SE LE PUEDE HACER DE UN TOQUE.
 //
 // Es la misma pieza en la tarjeta del pipeline y adentro del proyecto, para
 // que se toque igual en los dos lados:
@@ -19,19 +18,22 @@ import { comoActividad } from "./tareasDelProyecto";
 //   · su ETAPA, de un desplegable con las de su tipo. Al final del mismo
 //     desplegable están las dos salidas: aprobado y perdido.
 //   · su TIPO, que decide qué etapas ofrece.
-//   · qué sigue: su próximo paso con fecha, o desde cuándo espera al cliente.
-//     Si no tiene ninguna de las dos cosas lo dice en amarillo, y ahí mismo se
-//     le pone.
+//   · su ESTADO: EN CURSO o EN ESPERA. Los mismos dos que tiene cada
+//     actividad del checklist, y se cambian igual, con un botón que dice lo
+//     que hace: «Dejar en espera» y «Retomar».
 //
 // Se guarda solo, y dice al lado que guardó.
 //
-// CADA COSA DICE QUÉ ES. Hernán, 17/11/2026, mirando este cuadro en RES BG:
-// «¿este cuadro de diálogo al inicio qué hace?». Eran dos desplegables sin
-// nombre, un aviso que nombraba un solo punto y una fila de botones de fecha
-// siempre abierta. Adentro del proyecto ahora lleva sus títulos —etapa, tipo,
-// próximo paso—, dice la cuenta entera («ninguno de los 8 puntos abiertos
-// tiene fecha») y por qué importa, y los botones de fecha se abren al tocar
-// «Ponerle fecha» y se cierran con «Cancelar».
+// POR QUÉ DOS ESTADOS Y NO CINCO. Hernán, 26/11/2026: «El workflow del
+// pipeline es confuso». Esta pieza decía «próximo paso» y mostraba una de
+// cinco cosas —al día, vencido, sin próximo paso, esperando al cliente,
+// insistir—, con hasta tres botones distintos según cuál fuera; al que no
+// tenía un paso con fecha lo ponía en amarillo y le pedía una. De sus nueve
+// proyectos, cinco estaban en «Insistir con el cliente» en rojo desde hacía
+// hasta quince días, y «Insistí hoy» no se había usado nunca: la espera era el
+// estacionamiento. Ahora dejar algo en espera no obliga a poner un día —sin
+// recordatorio queda en gris, estacionado—, no tener fechas no es una falta, y
+// lo único que se pone en rojo es lo que venció o el día que uno mismo pidió.
 
 const APROBAR = "__aprobar", PERDER = "__perder";
 
@@ -45,7 +47,7 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
   const [estadoGuardado, setEstadoGuardado] = useState("");   // "" · guardando · guardado
   const [error, setError] = useState("");
   // Lo que se está por hacer y pide un dato más: perder (motivo), aprobar
-  // (confirmar), esperar / insistir / posponer (cuándo recordar).
+  // (confirmar), esperar (qué se espera y si se recuerda), posponer (cuándo).
   const [pidiendo, setPidiendo] = useState(null);
   const [texto, setTexto] = useState("");
   const [fecha, setFecha] = useState("");
@@ -74,35 +76,31 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
     return true;
   }
   const cerrarPedido = () => { setPidiendo(null); setTexto(""); setFecha(""); setPaso(""); setCuando({ dia: "", hora: "" }); setError(""); };
-  // Por qué no tiene próximo paso, dicho entero; null si lo tiene o espera.
-  const falta = explicarSinPaso(estado, tareas);
+  const espera = enEspera(estado);
+  // Lo único que avisa: llegó el día que se pidió, o venció algo con fecha.
+  const avisa = estado.clase === "insistir" || estado.clase === "vencido";
 
   function elegirEtapa(valor) {
     if (valor === APROBAR || valor === PERDER) { setPidiendo(valor === APROBAR ? "aprobar" : "perder"); setTexto(""); setError(""); return; }
     guardar(alCambiarEtapa(lead, valor, catalogo));
   }
 
-  // Los tres que piden «cuándo te lo recuerdo» comparten las mismas opciones.
+  // Dejarlo en espera, o seguir en espera: con un día para recordarlo, o sin ninguno.
   async function conRecordatorio(dia) {
-    const cambio = pidiendo === "esperar" ? alEsperar({ que: texto, recordarEl: dia, hoy })
-      : pidiendo === "insistir" ? alInsistir(lead, { recordarEl: dia, hoy })
-      : alPosponer({ recordarEl: dia, hoy });
+    const cambio = pidiendo === "esperar" ? alEsperar({ que: texto, recordarEl: dia, hoy }) : alPosponer({ recordarEl: dia, hoy });
     if (await guardar(cambio)) cerrarPedido();
   }
 
-  // Ponerle el próximo paso ahí mismo: una tarea suya, con fecha, de quien
-  // lleva el lead. Es la misma que después aparece en Tareas.
-  //
-  // CON HORA ES UNA REUNIÓN, y también si lo dice: así aparece como reunión en
-  // Tareas y en el checklist, y desde ahí se le manda la invitación al cliente.
-  async function sumarPaso(dia, hora = null) {
+  // AGREGAR QUÉ SIGUE ahí mismo, cuando no queda nada abierto: una actividad
+  // suya, de quien lleva el proyecto. Es la misma que después aparece en Tareas.
+  // La fecha es opcional. CON HORA ES UNA REUNIÓN, y también si lo dice.
+  async function sumarPaso(dia = null, hora = null) {
     const titulo = paso.trim();
-    if (!titulo) { setError("Escribí cuál es el próximo paso."); return; }
-    if (!dia) { setError("Elegí el día, o tocá Hoy, Mañana o En una semana."); return; }
+    if (!titulo) { setError("Escribí qué sigue."); return; }
     setError(""); setEstadoGuardado("guardando");
     const r = await agregarTarea({
-      lead, etapaId: lead.etapa, titulo, tipo: hora || /reuni[oó]n/i.test(titulo) ? "Reunión" : "Otro",
-      due_date: dia, hora: hora || null,
+      lead, etapaId: lead.etapa, titulo, tipo: (dia && hora) || /reuni[oó]n/i.test(titulo) ? "Reunión" : "Gestión",
+      due_date: dia || null, hora: dia ? hora || null : null,
       assignee_id: lead.responsable_id || currentUser?.id || null, quien: currentUser,
       orden: tareas.length + 1,
     });
@@ -111,20 +109,8 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
     setTimeout(() => setEstadoGuardado(e => (e === "guardado" ? "" : e)), 2500);
     onTareas?.();
   }
-  async function fecharPaso(dia, hora = undefined) {
-    if (!dia) { setError("Elegí el día, o tocá Hoy, Mañana o En una semana."); return; }
-    setError(""); setEstadoGuardado("guardando");
-    const e = await ponerFecha(comoActividad(estado.paso), dia, currentUser, hora);
-    setCuando({ dia: "", hora: "" });
-    if (e) { setError(e); setEstadoGuardado(""); return; }
-    setPidiendo(null); setEstadoGuardado("guardado");
-    setTimeout(() => setEstadoGuardado(x => (x === "guardado" ? "" : x)), 2500);
-    onTareas?.();
-  }
 
-  const tono = estado.clase === "insistir" || estado.clase === "vencido" ? colors.danger
-    : estado.clase === "sin_paso" ? colors.warning
-    : colors.inkSoft;
+  const tono = avisa ? colors.danger : colors.inkSoft;
   const sel = { ...inputStyle, width: "auto", padding: "5px 8px", fontSize: 12, fontWeight: 600, cursor: "pointer", maxWidth: "100%" };
   const parar = e => e.stopPropagation();
 
@@ -183,110 +169,95 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
         <Guardado estado={estadoGuardado} error="" />
       </div>
 
-      {/* Qué sigue: el próximo paso, o desde cuándo espera al cliente. */}
-      {ancho && <div style={{ ...rotulo, marginTop: 4 }}>PRÓXIMO PASO</div>}
-      <div className="que-sigue-del-lead" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-        <span style={{ fontSize: ancho ? 12.5 : 12, color: tono, fontWeight: estado.clase === "al_dia" || estado.clase === "esperando" ? 400 : 600,
-          display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0, overflowWrap: "anywhere" }}>
-          {(estado.clase === "esperando" || estado.clase === "insistir") && <Hourglass size={12} style={{ flexShrink: 0 }} />}
-          {estado.clase === "sin_paso" && <AlertTriangle size={12} style={{ flexShrink: 0 }} />}
-          {/* Adentro del proyecto hay lugar para decir la cuenta entera. */}
-          {ancho && falta ? falta.dice : loQueDice(estado)}
+      {/* EN QUÉ ESTÁ: en curso o en espera, y lo que hay para decir de eso. */}
+      {ancho && <div style={{ ...rotulo, marginTop: 4 }}>ESTADO</div>}
+      <div className="que-sigue-del-lead" data-estado={espera ? "espera" : "curso"} data-clase={estado.clase}
+        style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
+        <span className="estado-del-proyecto" style={pastilla(espera ? "espera" : estado.clase === "vencido" ? "vencido" : "curso")}>
+          {espera ? <><Hourglass size={11} /> En espera</> : estado.clase === "vencido" ? <><AlertTriangle size={11} /> Vencido</> : "En curso"}
+        </span>
+        <span className="lo-que-dice" style={{ fontSize: ancho ? 12.5 : 12, color: tono, fontWeight: avisa ? 600 : 400, minWidth: 0, overflowWrap: "anywhere" }}>
+          {loQueDice(estado)}
         </span>
 
         {editable && !pidiendo && (
-          lead.espera_desde ? (
+          espera ? (
             <>
-              <button onClick={() => guardar(alResponder(lead, hoy))} style={chip(false)}><Check size={11} /> Ya respondió</button>
-              <button onClick={() => setPidiendo("insistir")} style={chip(estado.clase === "insistir")}>Insistí hoy</button>
-              <button onClick={() => setPidiendo("posponer")} style={chip(false)}>Recordarme el…</button>
+              <button className="retomar" onClick={() => guardar(alResponder(lead, hoy))} style={chip(estado.clase === "insistir")} title="Ya no está en espera: vuelve a estar en curso">
+                <Check size={11} /> Retomar
+              </button>
+              <button className="seguir-en-espera" onClick={() => setPidiendo("posponer")} style={chip(false)} title="Sigue en espera: recordármelo otro día, o sin recordatorio">
+                {estado.clase === "insistir" ? "Sigue en espera…" : "Recordarme…"}
+              </button>
             </>
           ) : (
             <>
-              {/* SIN PRÓXIMO PASO NI ESPERA: se le pone acá, sin abrir nada. El
-                  botón dice a qué punto le pone la fecha. */}
-              {falta && (
-                <button className="poner-fecha" onClick={() => { setPidiendo("fecha"); setError(""); }} style={chip(true)}
-                  title={estado.paso ? "Elegir el día, y la hora si es una reunión" : "Escribir qué sigue y para cuándo"}>
-                  <CalendarPlus size={11} /> {ancho ? falta.boton : estado.paso ? "Ponerle fecha" : "Poner el próximo paso"}
+              {/* Sin nada abierto, lo que sigue se agrega acá mismo, sin abrir el proyecto. */}
+              {!estado.paso && (
+                <button className="agregar-que-sigue" onClick={() => { setPidiendo("fecha"); setError(""); }} style={chip(false)}>
+                  <CalendarPlus size={11} /> Agregar qué sigue
                 </button>
               )}
-              <button onClick={() => setPidiendo("esperar")} style={chip(false)} title="La pelota queda del lado del cliente, y FOREMAN te lo recuerda">
-                <Hourglass size={11} /> Esperar al cliente
+              <button className="dejar-en-espera" onClick={() => setPidiendo("esperar")} style={chip(false)} title="No depende de nosotros, o se retoma más adelante">
+                <Hourglass size={11} /> Dejar en espera
               </button>
             </>
           )
         )}
       </div>
-      {ancho && falta && !pidiendo && (
-        <div className="por-que-importa" style={{ fontSize: 11, color: colors.muted, lineHeight: 1.45 }}>
-          {falta.ayuda}{estado.paso ? " También se le puede poner fecha a cualquier otro punto, abriéndolo en el checklist de abajo." : ""}
-          {" "}Si lo que falta depende del cliente, tocá «Esperar al cliente».
-        </div>
-      )}
 
-      {/* PONERLE FECHA. Qué es, y cuándo. Los tres botones de un toque agendan
-          en el acto; el día exacto y la hora, con «Agendar». Antes esta fila
-          estaba siempre abierta, sin decir de qué era. */}
+      {/* AGREGAR QUÉ SIGUE. Qué es y, si se sabe, para cuándo. */}
       {editable && pidiendo === "fecha" && (
         <div className="proximo-paso" style={caja}>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>
-            {estado.paso ? `¿Para cuándo «${estado.paso.title}»?` : "¿Cuál es el próximo paso, y para cuándo?"}
-          </div>
-          {!estado.paso && (
-            <input value={paso} onChange={e => { setPaso(e.target.value); setError(""); }} aria-label="Próximo paso" autoFocus
-              placeholder="Ej: reunión con el cliente"
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarPaso(cuando.dia || sumarDias(hoy, 1), cuando.dia ? cuando.hora || null : null); } }}
-              style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
-          )}
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>¿Qué sigue?</div>
+          <input value={paso} onChange={e => { setPaso(e.target.value); setError(""); }} aria-label="Qué sigue" autoFocus
+            placeholder="Ej: reunión con el cliente, pedir la cotización"
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); sumarPaso(cuando.dia || null, cuando.dia ? cuando.hora || null : null); } }}
+            style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
           <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: colors.muted }}>Para:</span>
             {DIAS.map(([txt, n]) => (
-              <button key={txt} style={chip(false)}
-                onClick={() => (estado.paso ? fecharPaso(sumarDias(hoy, n), cuando.hora || undefined) : sumarPaso(sumarDias(hoy, n), cuando.hora || null))}>{txt}</button>
+              <button key={txt} style={chip(false)} onClick={() => sumarPaso(sumarDias(hoy, n), cuando.hora || null)}>{txt}</button>
             ))}
-            <span style={{ fontSize: 11, color: colors.muted }}>u otro día:</span>
-            <input type="date" value={cuando.dia} min={hoy} aria-label="Día del próximo paso"
+            <input type="date" value={cuando.dia} min={hoy} aria-label="Otro día"
               onChange={e => { setCuando(c => ({ ...c, dia: e.target.value })); setError(""); }}
               style={{ ...inputStyle, width: 132, padding: "3px 6px", fontSize: 11.5 }} />
             {/* La hora de una lista, no la ruleta del navegador. */}
-            <select value={cuando.hora} aria-label="Hora del próximo paso" onChange={e => setCuando(c => ({ ...c, hora: e.target.value }))}
+            <select value={cuando.hora} aria-label="Hora" onChange={e => setCuando(c => ({ ...c, hora: e.target.value }))}
               style={{ ...inputStyle, width: 104, padding: "3px 6px", fontSize: 11.5 }}>
               <option value="">Sin hora</option>
               {HORAS.map(h => <option key={h} value={h}>{h}</option>)}
             </select>
-            <button style={chip(true)}
-              onClick={() => (estado.paso ? fecharPaso(cuando.dia, cuando.hora || undefined) : sumarPaso(cuando.dia, cuando.hora || null))}>
-              Agendar
+            <button className="agregar-sin-fecha" style={chip(true)} onClick={() => sumarPaso(cuando.dia || null, cuando.dia ? cuando.hora || null : null)}>
+              {cuando.dia ? "Agregar" : "Agregar sin fecha"}
             </button>
             <button onClick={cerrarPedido} style={chip(false)}>Cancelar</button>
-          </div>
-          <div style={{ fontSize: 10.5, color: colors.muted, lineHeight: 1.45 }}>
-            {estado.paso
-              ? "«Hoy», «Mañana» y «En una semana» guardan al tocarlos. Con hora queda como reunión."
-              : "Queda como tarea del proyecto, la misma que se ve en Tareas. Con hora es una reunión: desde el checklist se le manda la invitación al cliente."}
           </div>
         </div>
       )}
 
-      {/* Esperar, insistir o correr el recordatorio: los tres piden un día. */}
-      {(pidiendo === "esperar" || pidiendo === "insistir" || pidiendo === "posponer") && (
-        <div style={caja}>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>
-            {pidiendo === "esperar" ? "Queda esperando al cliente. ¿Cuándo te lo recuerdo?"
-              : pidiendo === "insistir" ? "Anotado que insististe hoy. ¿Cuándo te lo vuelvo a recordar?"
-              : "¿Cuándo te lo recuerdo?"}
-          </div>
+      {/* DEJARLO EN ESPERA, o seguir en espera: qué se espera, y si se recuerda. */}
+      {(pidiendo === "esperar" || pidiendo === "posponer") && (
+        <div className="en-espera-del-proyecto" style={caja}>
           {pidiendo === "esperar" && (
-            <input value={texto} onChange={e => setTexto(e.target.value)} autoFocus placeholder="¿Qué se espera? Ej: que apruebe el presupuesto (opcional)"
-              style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+            <>
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>Queda en espera. ¿Qué se espera? <span style={{ fontWeight: 400, color: colors.muted }}>(opcional)</span></div>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {SE_ESPERA.map(q => <button key={q} className="se-espera" onClick={() => setTexto(v => (v === q ? "" : q))} style={chip(texto === q)}>{q}</button>)}
+              </div>
+              <input value={texto} onChange={e => setTexto(e.target.value)} aria-label="Qué se espera" placeholder="O escribilo: que apruebe el presupuesto, la cotización de FOGA…"
+                style={{ ...inputStyle, padding: "5px 8px", fontSize: 12 }} />
+            </>
           )}
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: colors.ink }}>{pidiendo === "esperar" ? "¿Te lo recuerdo?" : "Sigue en espera. ¿Te lo recuerdo?"}</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
             {RECORDAR_EN.map(o => (
-              <button key={o.dias} onClick={() => conRecordatorio(sumarDias(hoy, o.dias))} style={chip(true)}>{o.label}</button>
+              <button key={o.dias} onClick={() => conRecordatorio(sumarDias(hoy, o.dias))} style={chip(false)}>{o.label}</button>
             ))}
             <input type="date" value={fecha} min={hoy} onChange={e => setFecha(e.target.value)} aria-label="Otro día"
               style={{ ...inputStyle, width: 140, padding: "4px 7px", fontSize: 12 }} />
             {fecha && <button onClick={() => conRecordatorio(fecha)} style={chip(true)}>Ese día</button>}
+            <button className="sin-recordatorio" onClick={() => conRecordatorio(null)} style={chip(!fecha)} title="Queda estacionado: no avisa hasta que lo retomes">Sin recordatorio</button>
             <button onClick={cerrarPedido} style={chip(false)}>Cancelar</button>
           </div>
         </div>
@@ -326,6 +297,13 @@ export default function EstadoDelLead({ lead, tareas = [], catalogo = [], curren
 }
 
 const DIAS = [["Hoy", 0], ["Mañana", 1], ["En una semana", 7]];
+
+// El estado, en una pastilla: en curso, en espera, o vencido.
+const pastilla = cual => ({
+  display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 700, borderRadius: 14, padding: "2px 9px", whiteSpace: "nowrap", flexShrink: 0,
+  background: cual === "espera" ? colors.warningSoft : cual === "vencido" ? colors.dangerSoft : colors.brandSoft,
+  color: cual === "espera" ? colors.warning : cual === "vencido" ? colors.danger : colors.brand,
+});
 
 // El nombre de cada cosa, en chico: sin él, dos desplegables no dicen qué son.
 const rotulo = { fontSize: 10, fontWeight: 700, color: colors.muted, letterSpacing: 0.5 };

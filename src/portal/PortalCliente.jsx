@@ -303,7 +303,7 @@ export default function PortalCliente({ token }) {
 // marca desde acá.
 const ESTADO_DE_LISTA = {
   listo: { dice: "Listo", color: colors.success },
-  espera: { dice: "Hecho de nuestro lado · esperando respuesta", color: colors.warning },
+  espera: { dice: "En espera", color: colors.warning },
   pendiente: { dice: "Pendiente", color: colors.muted },
 };
 

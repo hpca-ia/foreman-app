@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     const siguen = d.pendientes.slice(0, 5);
     const html = plantilla({
       titulo: d.lead.nombre,
-      subtitulo: `${etapa}${d.espera ? " · esperando respuesta del cliente" : ""}`,
+      subtitulo: `${etapa}${d.espera ? " · en espera" : ""}`,
       cuerpo: `
         ${texto2html(informe)}
         ${siguen.length ? `

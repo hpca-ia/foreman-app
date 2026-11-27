@@ -354,7 +354,7 @@ export const avanceDeLaLista = (lista = []) => ({ listas: lista.filter(t => t.es
 /** Cómo se le dice cada estado al cliente. La pantalla del enlace usa las mismas palabras. */
 export const ESTADOS = {
   listo: { dice: "Listo", color: "#15803D" },
-  espera: { dice: "Hecho de nuestro lado · esperando respuesta", color: "#B45309" },
+  espera: { dice: "En espera", color: "#B45309" },
   pendiente: { dice: "Pendiente", color: "#6B7280" },
 };
 

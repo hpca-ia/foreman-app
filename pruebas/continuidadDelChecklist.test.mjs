@@ -1,141 +1,173 @@
-// Los dos cuadros que Hernán encontró confusos el 17/11/2026, mirando RES BG:
-// el de arriba del proyecto («¿este cuadro de diálogo al inicio qué hace?») y
-// el de un punto abierto («también es confuso... ¿qué sucede cuando ya se
-// completa esa tarea o gestión? ¿Si se agenda reunión o se pasa a otra
-// actividad relacionada? ¿Se abre una nueva tarea, o se genera desde ahí
-// mismo, por continuidad?» · «no tiene botón cerrar»).
+// EL FLUJO DEL PIPELINE, SIMPLE: un proyecto y cada una de sus actividades
+// están EN CURSO o EN ESPERA, hasta que se terminan.
+//
+// Hernán, 26/11/2026: «Se ha vuelto muy complejo de llenar, entender...
+// cuando tienes una actividad o tarea, pasar a la siguiente es confuso. Ya
+// tengo la actividad FOGA, ¿el check quiere decir completada? En efecto se
+// completó pero quiero que quede en stand-by hasta tener nuevo paso... ¿se
+// cierra y se abre nueva?». Y después: «El workflow del pipeline es confuso».
+//
+// Este archivo probaba el «¿Qué sigue?» del 17/11/2026: al terminar un punto
+// nacía OTRO, con lo que se escribiera de nombre. Las cuatro veces que se usó
+// en RES BG hubo que renombrar el punto nuevo para devolverle el tema (FOGA,
+// Eléctrico, Sanitario, Estructural). Eso se fue: ahora el punto es el tema, y
+// avanza.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { estadoDelLead, explicarSinPaso, loQueDice } from "../src/modules/leads/pipeline.js";
-import { loQueSigue } from "../src/modules/leads/tareasDelProyecto.js";
+import { estadoDelLead, enEspera, loQueDice, avisosDelPipeline } from "../src/modules/leads/pipeline.js";
+import * as reglas from "../src/modules/leads/tareasDelProyecto.js";
+import { ESTADOS } from "../api/_listaDelCliente.js";
 
+const { estadoDeActividad, alAvanzar, delProyecto, comoActividad } = reglas;
 const leer = ruta => readFileSync(new URL(ruta, import.meta.url), "utf8");
 const codigoDe = ruta => leer(ruta).split("\n").filter(l => !l.trim().startsWith("//")).join("\n");
 
-const HOY = "2026-11-17";
-const RES_BG = { id: 13, nombre: "RES BG", etapa: "con_ingenierias", tunel: "construccion", resultado: null };
-const t = (id, title, extra = {}) => ({ id, title, status: "en-progreso", due_date: null, lead_id: 13, ...extra });
-// Como estaba RES BG: ocho abiertos, ninguno con fecha; el más viejo, Eléctrica.
-const OCHO = [
-  t(135, "Revision de Electrica"), t(136, "Revision de Sanitaria"), t(137, "Revision de Estructural"), t(195, "MADEVAL"),
-  t(196, "FOGA"), t(197, "Window world"), t(198, "Persianas"), t(199, "Dekorando"),
-  t(120, "Levantamiento", { status: "listo" }), t(300, "Pedido de tubería", { compra_id: 4 }),
+const HOY = "2026-11-26";
+const RES_BG = { id: 13, nombre: "RES BG", etapa: "con_presupuesto", tunel: "construccion", resultado: null };
+const t = (id, title, extra = {}) => ({ id, title, status: "en-progreso", due_date: null, lead_id: 13, etapa_id: "con_presupuesto", ...extra });
+// Como estaba RES BG ese día: las cotizaciones abiertas, una sola cosa con fecha, y lo hecho.
+const PUNTOS = [
+  t(195, "MADEVAL"), t(197, "Window world"), t(199, "Dekorando"), t(204, "MODELADO EN REVIT", { due_date: "2026-11-30" }),
+  t(196, "FOGA"), t(120, "Levantamiento", { status: "listo", hecha_at: "2026-09-24T15:00:00Z" }), t(300, "Pedido de tubería", { compra_id: 4 }),
 ];
 
-test("LO QUE PREGUNTÓ: el cuadro de arriba dice la cuenta entera, por qué importa y qué hace el botón", () => {
-  const estado = estadoDelLead(RES_BG, OCHO, HOY);
-  assert.equal(estado.clase, "sin_paso");
-  // La tarjeta del pipeline sigue diciéndolo corto.
-  assert.equal(loQueDice(estado), "«Revision de Electrica» · sin fecha");
-  // Adentro del proyecto: no es Eléctrica, son los ocho. Lo hecho y las compras no cuentan.
-  assert.deepEqual(explicarSinPaso(estado, OCHO), {
-    dice: "Ninguno de los 8 puntos abiertos tiene fecha.",
-    ayuda: "Sin un paso con fecha nadie lo vuelve a mirar: FOREMAN lo recuerda el día que le pongas.",
-    boton: "Ponerle fecha a «Revision de Electrica»",
-  });
+test("LO QUE PIDIÓ: FOGA se completó y «queda en stand-by hasta tener nuevo paso»: sigue abierta, al fondo, y lo dice", () => {
+  const conFogaEnEspera = PUNTOS.map(p => (p.id === 196 ? { ...p, espera: true } : p));
+  const { abiertas, hechas } = delProyecto(conFogaEnEspera);
+  // No se fue a «hechos»: sigue en la lista, después de lo que está en curso.
+  assert.deepEqual(abiertas.map(p => p.title), ["MODELADO EN REVIT", "MADEVAL", "Window world", "Dekorando", "FOGA"]);
+  assert.deepEqual(hechas.map(p => p.title), ["Levantamiento"]);
+  const foga = comoActividad(abiertas.at(-1));
+  assert.deepEqual([foga.texto, foga.hecho, foga.espera], ["FOGA", false, true]);
+  assert.deepEqual(estadoDeActividad(foga, abiertas.at(-1), HOY), { clase: "espera", dice: "En espera" });
+  // Y el proyecto no pierde su próximo paso por eso.
+  assert.equal(loQueDice(estadoDelLead(RES_BG, conFogaEnEspera, HOY)), "«MODELADO EN REVIT» · en 4 días");
 });
 
-test("con un solo punto abierto se lo nombra; sin ninguno, se pide el próximo paso", () => {
-  const uno = [t(195, "MADEVAL")];
-  assert.equal(explicarSinPaso(estadoDelLead(RES_BG, uno, HOY), uno).dice, "«MADEVAL» no tiene fecha.");
-  const nada = [t(120, "Levantamiento", { status: "listo" })];
-  const e = explicarSinPaso(estadoDelLead(RES_BG, nada, HOY), nada);
-  assert.equal(e.dice, "No queda nada abierto en el checklist.");
-  assert.equal(e.boton, "Poner el próximo paso");
-  assert.equal(explicarSinPaso(estadoDelLead(RES_BG, [], HOY), []).boton, "Poner el próximo paso");
+test("AVANZÓ: lo que sigue se anota en el MISMO punto —con su fecha, si la tiene—; no nace otro con otro nombre", () => {
+  const foga = comoActividad(t(196, "FOGA"));
+  assert.deepEqual(alAvanzar({ item: foga, texto: "  gestionar reunión para consultas " }), { nota: "gestionar reunión para consultas", sacarDeEspera: false });
+  // Con día, el punto queda para ese día.
+  assert.deepEqual(alAvanzar({ item: foga, texto: "Reunión con FOGA", due_date: "2026-12-02" }), { nota: "Reunión con FOGA", fecha: "2026-12-02", sacarDeEspera: false });
+  // Si estaba en espera y avanzó, deja de estar en espera.
+  assert.equal(alAvanzar({ item: { ...foga, espera: true }, texto: "Llegó la cotización" }).sacarDeEspera, true);
+  // Sin texto no hay nada que anotar, y se dice.
+  assert.deepEqual(alAvanzar({ item: foga, texto: "   " }), { error: "Escribí qué pasó, o qué sigue." });
+  // La regla que abría otro punto ya no existe.
+  assert.equal(reglas.loQueSigue, undefined);
 });
 
-test("si tiene un paso con fecha, o espera al cliente, no hay nada que explicar", () => {
-  const conFecha = [t(195, "MADEVAL", { due_date: "2026-11-18" }), t(196, "FOGA")];
-  assert.equal(explicarSinPaso(estadoDelLead(RES_BG, conFecha, HOY), conFecha), null);
-  const vencido = [t(195, "MADEVAL", { due_date: "2026-11-10" })];
-  assert.equal(explicarSinPaso(estadoDelLead(RES_BG, vencido, HOY), vencido), null);
-  const esperando = { ...RES_BG, espera_desde: "2026-11-15", recordar_el: "2026-11-20" };
-  assert.equal(explicarSinPaso(estadoDelLead(esperando, OCHO, HOY), OCHO), null);
-  assert.equal(explicarSinPaso(null, OCHO), null);
+test("la fila dice en qué está, con palabras: en curso, en espera, para cuándo, vencida, hecha", () => {
+  const de = (extra = {}) => { const fila = t(1, "x", extra); return estadoDeActividad(comoActividad(fila), fila, HOY); };
+  assert.deepEqual(de(), { clase: "curso", dice: "En curso" });
+  assert.deepEqual(de({ espera: true }), { clase: "espera", dice: "En espera" });
+  assert.deepEqual(de({ due_date: "2026-11-30" }), { clase: "fecha", dice: "Para el 30 nov" });
+  assert.deepEqual(de({ due_date: "2026-11-30", hora: "10:00" }), { clase: "fecha", dice: "Para el 30 nov 10:00" });
+  assert.deepEqual(de({ due_date: HOY }), { clase: "fecha", dice: "Para hoy" });
+  assert.deepEqual(de({ due_date: "2026-11-20T00:00:00+00:00" }), { clase: "vencida", dice: "Venció el 20 nov" });
+  // En espera no se la da por vencida: no depende de nosotros.
+  assert.equal(de({ espera: true, due_date: "2026-11-20" }).clase, "espera");
+  assert.deepEqual(de({ status: "listo", due_date: "2026-11-20" }), { clase: "hecha", dice: "Hecha" });
 });
 
-test("el cuadro de arriba lleva sus títulos, y los botones de fecha se abren y se cierran", () => {
+test("«EL WORKFLOW ES CONFUSO»: el proyecto sin fechas no está en falta, y el que está en espera sin recordatorio, tampoco", () => {
+  const sinFechas = PUNTOS.map(p => ({ ...p, due_date: null }));
+  const estado = estadoDelLead(RES_BG, sinFechas, HOY);
+  assert.deepEqual([estado.clase, enEspera(estado), loQueDice(estado)], ["sin_paso", false, "5 actividades abiertas, sin fecha"]);
+  const estacionado = { ...RES_BG, id: 14, nombre: "Plaza Comercial Puembo", espera_desde: "2026-11-11", recordar_el: null };
+  const conDia = { ...RES_BG, id: 22, nombre: "Concurso PRONACA", espera_desde: "2026-11-11", recordar_el: "2026-11-18" };
+  const avisos = avisosDelPipeline({ leads: [RES_BG, estacionado, conDia], tareas: sinFechas, hoy: HOY });
+  // Avisa solo el que tiene un día pedido, y ese día llegó.
+  assert.deepEqual(avisos.map(a => [a.clase, a.nombre, a.texto]), [["insistir", "Concurso PRONACA", "En espera hace 15 días · tocaba revisarlo hace 8 días"]]);
+  for (const archivo of ["../src/lib/avisos.js", "../src/modules/leads/ModuloLeads.jsx", "../api/_resumen.js"]) assert.equal(codigoDe(archivo).includes("sin_paso"), false, archivo);
+});
+
+test("EL ✓ DE LA FILA PREGUNTA QUÉ PASÓ, ahí mismo, con tres botones que dicen lo que hacen", () => {
+  const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
+  // Tocar el ✓ de un punto abierto no lo cierra: abre la pregunta. El de uno hecho lo vuelve a abrir.
+  assert.match(lista, /className="que-paso-con-el-punto"[\s\S]{0,200}if \(item\.hecho\) onMarcar\?\.\(false\); else setPregunta\(p => \(p \? null : "elegir"\)\);/);
+  assert.match(lista, /<div className="que-paso"[\s\S]{0,400}¿Qué pasó con «\{item\.texto\}»\?/);
+  assert.match(lista, /className="avanzo" onClick=\{\(\) => setPregunta\("avanzo"\)\}[\s\S]{0,300}<strong>Avanzó: anotar qué sigue<\/strong>/);
+  assert.match(lista, /className="queda-en-espera" onClick=\{\(\) => \{ setPregunta\(null\); onEspera\?\.\(!item\.espera\); \}\}/);
+  assert.match(lista, /<strong>Queda en espera<\/strong>[\s\S]{0,160}No se cierra\./);
+  assert.match(lista, /className="terminada" onClick=\{\(\) => \{ setPregunta\(null\); onMarcar\?\.\(true\); \}\}[\s\S]{0,300}<strong>Terminada: ya no hay más que hacer<\/strong>/);
+  // AVANZÓ anota en el mismo punto: no agrega otro.
+  const avanzar = lista.slice(lista.indexOf("async function avanzar(item"), lista.indexOf("const naceALaVista"));
+  assert.match(avanzar, /const r = alAvanzar\(\{ item, texto, due_date \}\);/);
+  assert.match(avanzar, /await anotarEnLaTarea\(item, r\.nota, currentUser, \{ alCliente:/);
+  assert.match(avanzar, /if \(r\.fecha\) \{ const e = await ponerFecha\(item, r\.fecha, currentUser\);/);
+  assert.match(avanzar, /if \(r\.sacarDeEspera\) await marcarEspera\(item, false, currentUser\);/);
+  assert.doesNotMatch(avanzar, /agregarTarea\(/);
+  // Y terminarlo ya no pregunta nada ni abre otro: el «¿Qué sigue?» de antes no está.
+  assert.doesNotMatch(lista, /loQueSigue|preguntarQueSigue|sumarLoQueSigue|className="que-sigue"|setSigue\(|Nada más/);
+  // Lo que se anota al avanzar lo lee el cliente solo si ve el punto, y se puede destildar.
+  assert.match(lista, /\{puedeLeerlo && \(\s+<label[\s\S]{0,300}className="que-lo-lea-el-cliente"/);
+});
+
+test("LA FILA, LIMPIA: su estado en una pastilla, y de lo demás solo lo que la distingue", () => {
+  const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
+  assert.match(lista, /const est = estadoDeActividad\(item, tarea, hoy\);/);
+  assert.match(lista, /className="estado-de-la-actividad" data-estado=\{est\.clase\} style=\{pildora\(est\.clase\)\}/);
+  // «gestión» se dice solo cuando NO lo es; «la ve el cliente», nunca; la que no ve, sí.
+  assert.match(lista, /claseDe\(tarea\) !== "gestion" \? <span/);
+  assert.doesNotMatch(lista, /className="la-ve-el-cliente"/);
+  assert.match(lista, /className="no-la-ve-el-cliente"/);
+  // Y ya no hay un «sin fecha» en rojo en cada fila.
+  assert.equal(lista.includes('"sin fecha"'), false);
+  // Arriba dice cuántos hay en espera, y enseña el gesto en una frase.
+  assert.match(lista, /\{enEspera > 0 \? ` · \$\{enEspera\} en espera` : ""\}/);
+  assert.ok(lista.includes("Tocá el ✓ de un punto para decir qué pasó: avanzó, queda en espera o terminó."));
+});
+
+test("EL PUNTO ABIERTO, CORTO: qué pasó, para cuándo y su estado; lo del cliente y lo demás, plegados", () => {
+  const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
+  const abierto = lista.slice(lista.indexOf('className="punto-abierto"'));
+  // En ese orden.
+  const orden = ['titulo="¿QUÉ PASÓ? · EL HISTORIAL DE ESTE PUNTO"', 'className="para-cuando"', 'className="ya-esta"', 'className="ver-lo-del-cliente"', 'className="ver-mas"'].map(x => abierto.indexOf(x));
+  assert.ok(orden.every(i => i > 0), `falta una parte: ${orden}`);
+  assert.deepEqual([...orden].sort((a, b) => a - b), orden);
+  // El estado, con los mismos nombres que pregunta el ✓.
+  assert.match(abierto, /className="en-espera" onClick=\{\(\) => onEspera\?\.\(!item\.espera\)\}[\s\S]{0,160}"Ya no está en espera" : "Dejar en espera"/);
+  assert.match(abierto, /className="marcar-hecha" onClick=\{\(\) => onMarcar\?\.\(true\)\}[\s\S]{0,260}Terminada/);
+  assert.match(abierto, /className="volver-a-abrir" onClick=\{\(\) => onMarcar\?\.\(false\)\}/);
+  assert.equal(abierto.includes("¿YA ESTÁ?"), false);
+  // Lo del cliente: una línea que dice qué ve, y se abre para lo demás.
+  assert.match(abierto, /\{verCliente && laVeElCliente && \(\s+<div className="para-el-cliente"/);
+  assert.match(abierto, /\{verCliente && !laVeElCliente && onCliente && editable && \(\s+<div className="no-lo-ve-el-cliente"/);
+  assert.match(lista, /const resumenDelCliente = !laVeElCliente \? "no ve este punto" : \["lo ve",/);
+  // Etapa, responsable y quitar: detrás de «Más».
+  assert.match(abierto, /\{mas && onEtapa && etapas\.length > 0 && \(/);
+  assert.match(abierto, /\{mas \? "Menos" : "Más: etapa, responsable, quitar"\}/);
+  // Se cierra arriba, abajo y con la flecha; y agendar una reunión sigue siendo en el mismo punto.
+  assert.equal((lista.match(/className="cerrar-punto" onClick=\{onAbrir\}/g) || []).length, 2);
+  assert.match(lista, /className="abrir-o-cerrar" onClick=\{onAbrir\} aria-expanded=\{abierta\}/);
+  assert.match(lista, /className="avisar-reunion" onClick=\{\(\) => onAvisar\(tarea\)\}/);
+  // Corregir un punto es una ventana encima, no un cuadro al pie de toda la lista.
+  assert.match(lista, /\{aTarea && \(\s+<div className="corregir-punto"\s+style=\{\{ position: "fixed", inset: 0,/);
+});
+
+test("EL PROYECTO: su estado es En curso o En espera, con «Dejar en espera» y «Retomar»; el recordatorio es opcional", () => {
   const estado = codigoDe("../src/modules/leads/EstadoDelLead.jsx");
   assert.match(estado, /\{ancho && <span style=\{rotulo\}>ETAPA<\/span>\}/);
   assert.match(estado, />TIPO<\/span>/);
-  assert.match(estado, />PRÓXIMO PASO<\/div>/);
-  assert.match(estado, /\{ancho && falta \? falta\.dice : loQueDice\(estado\)\}/);
-  // La fila de fechas ya no está siempre abierta: se pide, y tiene «Cancelar».
-  assert.match(estado, /\{editable && pidiendo === "fecha" && \(/);
-  assert.doesNotMatch(estado, /!pidiendo && estado\.clase === "sin_paso" && \(/);
-  assert.match(estado, /<button onClick=\{cerrarPedido\} style=\{chip\(false\)\}>Cancelar<\/button>/);
-  // Y al guardar se cierra sola.
-  assert.equal((estado.match(/setPidiendo\(null\); setEstadoGuardado\("guardado"\);/g) || []).length, 2);
+  assert.match(estado, />ESTADO<\/div>/);
+  assert.match(estado, /className="estado-del-proyecto"[\s\S]{0,260}En espera<\/> : estado\.clase === "vencido" \?[\s\S]{0,80}Vencido<\/> : "En curso"\}/);
+  assert.match(estado, /className="dejar-en-espera" onClick=\{\(\) => setPidiendo\("esperar"\)\}/);
+  assert.match(estado, /className="retomar" onClick=\{\(\) => guardar\(alResponder\(lead, hoy\)\)\}/);
+  assert.match(estado, /className="seguir-en-espera" onClick=\{\(\) => setPidiendo\("posponer"\)\}/);
+  // De quién se espera, de un toque; y se puede dejar sin recordatorio.
+  assert.match(estado, /\{SE_ESPERA\.map\(q => <button key=\{q\} className="se-espera"/);
+  assert.match(estado, /className="sin-recordatorio" onClick=\{\(\) => conRecordatorio\(null\)\}/);
+  assert.match(estado, /pidiendo === "esperar" \? alEsperar\(\{ que: texto, recordarEl: dia, hoy \}\) : alPosponer\(\{ recordarEl: dia, hoy \}\)/);
+  // Lo de antes no está: ni «próximo paso» como título, ni tres botones distintos, ni pedir una fecha en amarillo.
+  assert.doesNotMatch(estado, /PRÓXIMO PASO|Insistí hoy|Ya respondió|Esperar al cliente|explicarSinPaso|alInsistir|por-que-importa/);
+  // Sin nada abierto, lo que sigue se agrega ahí mismo, y la fecha no es obligatoria.
+  assert.match(estado, /\{!estado\.paso && \(\s+<button className="agregar-que-sigue"/);
+  assert.match(estado, /\{cuando\.dia \? "Agregar" : "Agregar sin fecha"\}/);
 });
 
-// ── Lo que sigue ────────────────────────────────────────────────────────────
-const ELECTRICA = { id: 135, tarea_id: 135, texto: "Revision de Electrica", etapa_id: "con_ingenierias", lead_id: 13 };
-const FILA = { id: 135, title: "Revision de Electrica", type: "Gestión", assignee_id: 1, responsable_externo: null };
-
-test("LO QUE PREGUNTÓ: al terminar un punto, lo que sigue nace de él — misma etapa, misma persona", () => {
-  assert.deepEqual(loQueSigue({ de: ELECTRICA, tarea: FILA, clase: "gestion", texto: "  Pedir la corrección de los planos " }), {
-    titulo: "Pedir la corrección de los planos", etapaId: "con_ingenierias", tipo: "Gestión", due_date: null, hora: null,
-    assignee_id: 1, responsable_externo: null, vieneDe: { id: 135, texto: "Revision de Electrica" },
-  });
-  // El de afuera que lo tenía lo sigue teniendo.
-  const deAfuera = loQueSigue({ de: ELECTRICA, tarea: { ...FILA, assignee_id: null, responsable_externo: "Ing. Jácome" }, texto: "Entregar planos corregidos", due_date: "2026-11-21" });
-  assert.equal(deAfuera.responsable_externo, "Ing. Jácome");
-  assert.equal(deAfuera.assignee_id, null);
-  assert.equal(deAfuera.due_date, "2026-11-21");
-  // Una tarea sigue en tarea; lo demás, en gestión.
-  assert.equal(loQueSigue({ de: ELECTRICA, tarea: FILA, clase: "tarea", texto: "Dibujar el detalle" }).tipo, "Otro");
-  assert.equal(loQueSigue({ de: ELECTRICA, tarea: FILA, clase: "reunion", texto: "Mandar la minuta" }).tipo, "Gestión");
-});
-
-test("«si se agenda reunión»: con día y hora, lo que sigue es una reunión", () => {
-  const r = loQueSigue({ de: ELECTRICA, tarea: FILA, clase: "gestion", texto: "Reunión con el ingeniero eléctrico", due_date: "2026-11-20", hora: "10:00" });
-  assert.equal(r.tipo, "Reunión");
-  assert.equal(r.hora, "10:00");
-  // Solo con día no: «coordinar la reunión» es una gestión.
-  const sinHora = loQueSigue({ de: ELECTRICA, tarea: FILA, clase: "gestion", texto: "Coordinar la reunión", due_date: "2026-11-20" });
-  assert.equal(sinHora.tipo, "Gestión");
-  assert.equal(sinHora.hora, null);
-});
-
-test("lo que falta se dice: sin texto no nace nada, y la hora pide el día", () => {
-  assert.deepEqual(loQueSigue({ de: ELECTRICA, tarea: FILA, texto: "   " }), { error: "Escribí qué sigue, o tocá «Nada más»." });
-  assert.deepEqual(loQueSigue({ de: ELECTRICA, tarea: FILA, texto: "Reunión", hora: "10:00" }), { error: "Para ponerle hora, primero elegí el día." });
-  // Un punto sin etapa ni responsable sigue sin etapa ni responsable.
-  const suelto = loQueSigue({ de: { id: 9, texto: "Llamar", etapa_id: null }, texto: "Volver a llamar" });
-  assert.equal(suelto.etapaId, null);
-  assert.equal(suelto.assignee_id, null);
-});
-
-test("al marcar un punto se pregunta qué sigue; a un envío y a una compra no", () => {
-  const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
-  assert.match(lista, /const e = await marcarItem\(item, hecho, currentUser\?\.name, currentUser\);/);
-  assert.match(lista, /if \(hecho && clase !== "envio" && clase !== "compra"\) \{ preguntarQueSigue\(item\);/);
-  // La casilla de la fila y el botón de adentro marcan por el mismo lado.
-  assert.match(lista, /onClick=\{\(\) => editable && onMarcar\?\.\(!item\.hecho\)\}/);
-  assert.match(lista, /className="marcar-hecha" onClick=\{\(\) => onMarcar\?\.\(true\)\}/);
-  assert.doesNotMatch(lista, /hacer\(\(\) => marcarItem\(/);
-  // Nace con lo que dice la regla, y dice de dónde viene.
-  assert.match(lista, /const r = loQueSigue\(\{ de: v\.de, tarea: t, clase: claseDe\(t\), texto: v\.texto, due_date: v\.due_date, hora: v\.hora \}\);/);
-  assert.match(lista, /assignee_id: r\.assignee_id, responsable_externo: r\.responsable_externo, vieneDe: r\.vieneDe,/);
-  // No es obligatorio.
-  assert.match(lista, /<button onClick=\{\(\) => setSigue\(null\)\} style=\{boton\(false\)\}>Nada más<\/button>/);
-  // Lo del cliente se pregunta solo si el anterior se le mostraba, y entonces
-  // viene marcado: lo que sigue de un punto que él ve, también lo ve (17/11/2026).
-  assert.match(lista, /\{sigue\.loVeia && !sinCompartir && \(/);
-  assert.match(lista, /alCliente: compartidas\.has\(item\.id\), loVeia: compartidas\.has\(item\.id\)/);
-});
-
-test("un punto abierto se lee en partes con título, y se cierra: arriba, abajo y con la flecha de la fila", () => {
-  const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
-  for (const titulo of ["¿PARA CUÁNDO?", "LO QUE VE EL CLIENTE DE ESTE PUNTO", "¿YA ESTÁ?"]) assert.ok(lista.includes(`>${titulo}<`), `falta el título ${titulo}`);
-  assert.match(lista, /titulo="¿QUÉ PASÓ\? · EL HISTORIAL DE ESTE PUNTO"/);
-  assert.equal((lista.match(/className="cerrar-punto" onClick=\{onAbrir\}/g) || []).length, 2);
-  assert.match(lista, /className="abrir-o-cerrar" onClick=\{onAbrir\} aria-expanded=\{abierta\}/);
-  // Agendar una reunión es en el mismo punto, y ahí mismo se avisa.
-  assert.match(lista, /className="avisar-reunion" onClick=\{\(\) => onAvisar\(tarea\)\}/);
-  assert.match(lista, /Para agendar una reunión no se abre otra tarea: se le pone día y hora a este punto\./);
-  // Corregir un punto es una ventana encima, no un cuadro al pie de toda la lista.
-  assert.match(lista, /\{aTarea && \(\s+<div className="corregir-punto"\s+style=\{\{ position: "fixed", inset: 0,/);
+test("al cliente, un punto en espera se le dice «En espera»: ya no «hecho de nuestro lado», que no siempre es verdad", () => {
+  assert.equal(ESTADOS.espera.dice, "En espera");
+  assert.match(codigoDe("../src/portal/PortalCliente.jsx"), /espera: \{ dice: "En espera", color: colors\.warning \}/);
 });

@@ -16,8 +16,8 @@ test("adentro de la tarea, la bitácora no repite su nombre", () => {
   assert.equal(dichoAdentro('Le encargó "Presupuesto corregido" a Hernan Cueva, para el 23 oct'), "Se le encargó a Hernan Cueva, para el 23 oct");
   assert.equal(dichoAdentro('"MADEVAL" queda para el 18 nov'), "Queda para el 18 nov");
   assert.equal(dichoAdentro('"MADEVAL" se queda sin fecha'), "Se queda sin fecha");
-  assert.equal(dichoAdentro('"MADEVAL" queda esperando a un tercero'), "Queda esperando a un tercero");
-  assert.equal(dichoAdentro('"Firma de Pagares para anticipo" ya no espera'), "Ya no espera a un tercero");
+  assert.equal(dichoAdentro('"MADEVAL" queda esperando a un tercero'), "Queda en espera");
+  assert.equal(dichoAdentro('"Firma de Pagares para anticipo" ya no espera'), "Ya no está en espera");
   assert.equal(dichoAdentro('Le mostró al cliente "MADEVAL"'), "Se le mostró al cliente");
   assert.equal(dichoAdentro('Dejó de mostrarle al cliente "MADEVAL"'), "Se le dejó de mostrar al cliente");
   assert.equal(dichoAdentro('Arregló "Espera de Borrador de Contrato": se mueve del 1 oct al 2 oct.'), "Se corrigió: se mueve del 1 oct al 2 oct.");
@@ -64,7 +64,7 @@ test("MADEVAL: contactar, fijar la reunión, esperar la cotización, hecha. Se l
     ["11-13", "Hernan Cueva", "Llamé a Madeval, hablé con Andrea. Quedan en confirmar la reunión.", false],
     ["11-14", "Hernan Cueva", "Se corrigió: pasa de nadie a Johanna, queda para el 18 nov a las 10:00.", true],
     ["11-18", "Johanna", "Reunión hecha. Mandan la cotización el viernes.", false],
-    ["11-18", "Johanna", "Queda esperando a un tercero", true],
+    ["11-18", "Johanna", "Queda en espera", true],
     ["11-24", "Johanna", "Llegó la cotización: $18.400.", false],
     ["11-24", "Johanna", "Se marcó como hecha", true],
   ]);

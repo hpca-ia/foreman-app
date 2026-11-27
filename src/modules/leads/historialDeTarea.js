@@ -49,8 +49,8 @@ export function dichoAdentro(detalle) {
   if ((m = d.match(/^Le encargó ".*" a (.+)$/))) return `Se le encargó a ${m[1]}`;
   if ((m = d.match(/^".*" queda para el (.+)$/))) return `Queda para el ${m[1]}`;
   if (/^".*" se queda sin fecha$/.test(d)) return "Se queda sin fecha";
-  if (/^".*" queda esperando a un tercero$/.test(d)) return "Queda esperando a un tercero";
-  if (/^".*" ya no espera$/.test(d)) return "Ya no espera a un tercero";
+  if (/^".*" queda esperando a un tercero$/.test(d)) return "Queda en espera";
+  if (/^".*" ya no espera$/.test(d)) return "Ya no está en espera";
   // La aprobación que se le pide desde su enlace (migración 186).
   if ((m = d.match(/^Le pidió al cliente que apruebe ".*", hasta el (.+)$/))) return `Se le pidió al cliente que lo apruebe, hasta el ${m[1]}`;
   if (/^Le pidió al cliente que apruebe "/.test(d)) return "Se le pidió al cliente que lo apruebe";

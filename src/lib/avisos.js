@@ -19,9 +19,9 @@ const nombres = (lista, max = 3) => {
 };
 
 const DEL_PIPELINE = {
-  insistir: { tono: "peligro", uno: "lead para insistir con el cliente", varios: "leads para insistir con el cliente" },
-  vencido: { tono: "peligro", uno: "lead con el próximo paso vencido", varios: "leads con el próximo paso vencido" },
-  sin_paso: { tono: "atencion", uno: "lead sin próximo paso con fecha", varios: "leads sin próximo paso con fecha" },
+  // Dos, y nada más (pipeline.js): el que está en espera y llegó el día que se pidió, y el que tiene algo vencido.
+  insistir: { tono: "peligro", uno: "proyecto en espera para revisar", varios: "proyectos en espera para revisar" },
+  vencido: { tono: "peligro", uno: "proyecto con algo vencido", varios: "proyectos con algo vencido" },
 };
 
 /**

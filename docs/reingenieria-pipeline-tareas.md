@@ -402,3 +402,43 @@ fase 5), los permisos por proyecto y el portal del cliente.
 - [x] Fase 4 — Tareas: una bandeja que se pueda creer (11/11/2026; migración 172, corrida y publicada)
 - [x] Fase 5 — Los compromisos de las actas (11/11/2026; migración 173, corrida y publicada)
 - [x] Fase 6 — Limpieza (11/11/2026; código publicado; migraciones 174 y 175 corridas y verificadas ese día)
+
+## Después de la reingeniería: el flujo, simplificado (26/11/2026)
+
+Hernán: «Se ha vuelto muy complejo de llenar, entender... cuando tienes una
+actividad o tarea, pasar a la siguiente es confuso. Ya tengo la actividad
+FOGA, ¿el check quiere decir completada? En efecto se completó pero quiero
+que quede en stand-by hasta tener nuevo paso... ¿se cierra y se abre nueva?».
+Y: «El workflow del pipeline es confuso».
+
+Lo que había, medido en la base ese día:
+
+- El ✓ de un punto lo cerraba y preguntaba «¿qué sigue?»; lo que se escribía
+  nacía como OTRO punto. Las cuatro veces que se usó en RES BG hubo que
+  renombrar el punto nuevo para devolverle el tema.
+- «Espera a un tercero» existía, al fondo del punto abierto: cero usos.
+- El proyecto tenía cinco estados que salían de reglas, y avisaba si no tenía
+  un paso con fecha o una espera con día. De nueve proyectos, cinco estaban en
+  «Insistir con el cliente»; «Insistí hoy» no se había usado nunca.
+
+Cómo queda. **Una sola idea para el proyecto y para cada actividad: en curso
+⇄ en espera → hecho.**
+
+- **La actividad es un tema que avanza.** El ✓ pregunta en la misma fila qué
+  pasó: *avanzó* (se anota en el mismo punto qué sigue, con su fecha si la
+  tiene), *queda en espera* (sigue en la lista, al fondo) o *terminada* (recién
+  ahí va a «hechos»). No nace otro punto.
+- **La fila dice su estado con palabras** y, de lo demás, solo lo que la
+  distingue. Se fueron «gestión», «la ve el cliente» y «sin fecha» en rojo.
+- **El punto abierto es corto**: qué pasó, para cuándo, su estado. Lo del
+  cliente y lo que se toca poco, plegados.
+- **El proyecto está en curso o en espera**, con «Dejar en espera» y
+  «Retomar». Qué se espera y el recordatorio son opcionales: sin día queda
+  estacionado, en gris.
+- **Los avisos del pipeline son dos**: llegó el día que se pidió para revisar
+  uno que está en espera, o venció algo que tenía fecha. «Sin próximo paso»
+  ya no avisa. Vale igual para el panel de inicio, la bandeja y el correo de
+  la mañana.
+
+Sin migración: usa `tasks.espera`, `tarea_comentarios` y las columnas de
+espera de `leads`, que ya estaban.

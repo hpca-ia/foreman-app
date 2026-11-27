@@ -53,7 +53,7 @@ export function bandeja({ tareas = [], usuarioId, leads = [], veTodo = false, ho
   const esMia = t => mismo(t.assignee_id, usuarioId);
   const sinNadie = t => !t.assignee_id && !t.responsable_externo;
 
-  // Lo mío que todavía depende de mí. Lo que marqué «espera a un tercero» ya
+  // Lo mío que todavía depende de mí. Lo que dejé «en espera» ya
   // hice mi parte: va del otro lado.
   const mias = abiertas.filter(t => esMia(t) && !t.espera).sort(porFecha);
   const enUnaSemana = sumarDias(hoy, 7);
@@ -68,7 +68,7 @@ export function bandeja({ tareas = [], usuarioId, leads = [], veTodo = false, ho
   const meToca = [
     // Lo vencido primero, y pide una decisión: no se queda en rojo.
     { clave: "vencidas", titulo: "Vencidas", pide: "decision", tareas: mias.filter(t => cuando(t) && cuando(t) < hoy) },
-    { clave: "insistir", titulo: "Insistir con el cliente", tareas: [], leads: misLeads.filter(x => x.clase === "insistir") },
+    { clave: "insistir", titulo: "Proyectos en espera: toca revisar", tareas: [], leads: misLeads.filter(x => x.clase === "insistir") },
     { clave: "hoy", titulo: "Hoy", tareas: mias.filter(t => cuando(t) === hoy) },
     { clave: "semana", titulo: "Esta semana", tareas: mias.filter(t => cuando(t) > hoy && cuando(t) <= enUnaSemana) },
     { clave: "despues", titulo: "Más adelante", tareas: mias.filter(t => cuando(t) > enUnaSemana) },
@@ -84,8 +84,8 @@ export function bandeja({ tareas = [], usuarioId, leads = [], veTodo = false, ho
     { clave: "encargadas", titulo: "Lo que encargué",
       tareas: abiertas.filter(t => mismo(t.created_by, usuarioId) && !esMia(t) && !sinNadie(t)).sort(porFecha) },
     // Lo mío que ya hice de mi lado y depende de un tercero.
-    { clave: "terceros", titulo: "Espera a un tercero", tareas: abiertas.filter(t => esMia(t) && t.espera).sort(porFecha) },
-    { clave: "clientes", titulo: "Esperando al cliente", tareas: [], leads: misLeads.filter(x => x.clase === "esperando") },
+    { clave: "terceros", titulo: "En espera", tareas: abiertas.filter(t => esMia(t) && t.espera).sort(porFecha) },
+    { clave: "clientes", titulo: "Proyectos en espera", tareas: [], leads: misLeads.filter(x => x.clase === "esperando") },
   ].filter(g => g.tareas.length || g.leads?.length);
 
   const cuantas = partes => partes.reduce((n, g) => n + g.tareas.length + (g.leads?.length || 0), 0);
