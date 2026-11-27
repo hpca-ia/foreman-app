@@ -32,6 +32,7 @@ import EditorHonorarios from "./presupuestos/EditorHonorarios";
 import RevisarPresupuesto from "./presupuestos/RevisarPresupuesto";
 import PanelEtapas from "./presupuestos/PanelEtapas";
 import { CampoPrecio, CampoTexto, SelectorUnidad } from "./presupuestos/camposRubro";
+import { loQueEstaEnCero, avisoDeCero, cuantosEnCero } from "./presupuestos/rubroEnCero";
 import ResultadosBase from "./presupuestos/ResultadosBase";
 import { puntaje } from "../lib/buscarRubros";
 import { lineasHonorarios, totalesPresupuesto } from "./presupuestos/honorarios";
@@ -2024,6 +2025,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
             const capExtras=todosDelCap.filter(i=>i.extra).reduce((s,i)=>s+(Number(i.total)||0),0);
             const hayExtras=todosDelCap.some(i=>i.extra);
             const capTotal=todosDelCap.reduce((s,i)=>s+(Number(i.total)||0),0);
+            // Cuántos quedaron con la cantidad o el precio en 0: se ve en la cabeza del capítulo.
+            const capEnCero=cuantosEnCero(todosDelCap);
             // Buscando se ven solo los que calzan, pero el número y las flechas
             // siguen siendo los de su sitio real en el capítulo.
             const posEnCap=new Map(todosDelCap.map((i,k)=>[i.id,k]));
@@ -2081,6 +2084,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                     />
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,marginLeft:"auto"}}>
+                    {capEnCero>0&&(
+                      <span className="capitulo-con-ceros" title={`${capEnCero} ${capEnCero===1?"rubro":"rubros"} con la cantidad o el precio en 0`}
+                        style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:11,fontWeight:700,color:"var(--danger)",background:"#fff",border:"1px solid var(--danger-border)",borderRadius:10,padding:"1px 7px",whiteSpace:"nowrap"}}>
+                        <span style={{width:7,height:7,borderRadius:"50%",background:"var(--danger)"}}/>{capEnCero} {capEnCero===1?"rubro":"rubros"} en 0
+                      </span>
+                    )}
                     {capTotal>0&&<span style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",whiteSpace:"nowrap"}}>${fmt(capTotal)}</span>}
                     {/* Cuánto pesa el capítulo en el costo directo (sin honorarios ni IVA). */}
                     {capTotal>0&&costoDirecto>0&&(
@@ -2190,6 +2199,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                       const itemIdx=posEnCap.get(item.id);
                       // El subcapítulo de extras empieza en el primero que lo es.
                       const abreExtras=item.extra&&!capItems[k-1]?.extra;
+                      const enCero=loQueEstaEnCero(item);
                       return(
                         <Fragment key={item.id}>
                         {abreExtras&&(
@@ -2257,6 +2267,12 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                           </td>
                           <td style={{padding:"3px 4px"}}>
                             <div style={{display:"flex",alignItems:"flex-start",gap:5,minWidth:0}}>
+                              {/* EL PUNTO ROJO: la cantidad o el precio está en 0, y el
+                                  rubro no suma. El campo que falta queda en rojo también. */}
+                              {enCero.length>0&&(
+                                <span className="rubro-en-cero" role="img" title={avisoDeCero(enCero)} aria-label={avisoDeCero(enCero)}
+                                  style={{flexShrink:0,width:8,height:8,borderRadius:"50%",background:"var(--danger)",marginTop:5}}/>
+                              )}
                               {/* EN QUÉ ETAPA QUEDÓ ESTE RUBRO.
                                   Solo si el presupuesto se cobra por etapas: en
                                   uno normal sería una columna de guiones.
@@ -2297,8 +2313,8 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                             <SelectorUnidad valor={item.unidad} onCambiar={v=>actualizarItemMulti(item.id,{unidad:v})}/>
                           </td>
                           <td style={{padding:"5px 8px"}}>
-                            <input type="number" className="num-limpio" value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
-                              style={{width:"100%",boxSizing:"border-box",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
+                            <input type="number" className={`num-limpio${enCero.includes("cantidad")?" cantidad-en-cero":""}`} value={item.cantidad} onChange={e=>actualizarItem(item.id,"cantidad",e.target.value)}
+                              style={{width:"100%",boxSizing:"border-box",background:enCero.includes("cantidad")?"var(--danger-soft)":"var(--bg)",border:`1px solid ${enCero.includes("cantidad")?"var(--danger-border)":"var(--border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 6px"}}>
                             {/* La base es la referencia —el costo o el precio original— y no se
@@ -2356,7 +2372,7 @@ export default function ModuloPresupuestos({ currentUser, puede, nivelProyecto =
                                 if(!(base>0)&&v>0) actualizarItemMulti(item.id,{precio_unitario:v,precio_base:v,utilidad_pct:0});
                                 else if(v!==Number(item.precio_unitario)) actualizarItemMulti(item.id,{precio_unitario:v,...(base>0?{utilidad_pct:Math.round((v/base-1)*10000)/100}:{})});
                               }}
-                              style={{width:"100%",boxSizing:"border-box",background:Number(item.precio_unitario)?"var(--bg)":"var(--warning-soft)",border:`1px solid ${Number(item.precio_unitario)?"var(--border)":"var(--warning-border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
+                              style={{width:"100%",boxSizing:"border-box",background:enCero.includes("precio")?"var(--danger-soft)":"var(--bg)",border:`1px solid ${enCero.includes("precio")?"var(--danger-border)":"var(--border)"}`,borderRadius:6,padding:"4px 6px",fontSize:12,textAlign:"right"}}/>
                           </td>
                           <td style={{padding:"5px 8px",fontWeight:600,color:"var(--ink)",whiteSpace:"nowrap",textAlign:"right"}}>${fmt(item.total)}</td>
                           <td style={{padding:"5px 4px",textAlign:"center"}}>
