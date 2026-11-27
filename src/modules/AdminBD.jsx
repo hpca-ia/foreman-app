@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import { inputStyle } from "../components/ui/Input";
 import Button from "../components/ui/Button";
 import DuplicadosRubros from "./presupuestos/DuplicadosRubros";
+import CarpetasDeArchivos from "./CarpetasDeArchivos";
 
 export default function AdminBD({ onVolver, currentUser }) {
   const [tab, setTab] = useState("rubros"); // rubros | capitulos | duplicados
@@ -76,9 +77,11 @@ export default function AdminBD({ onVolver, currentUser }) {
         <button onClick={() => setTab("capitulos")} style={tabS(tab === "capitulos")}>Capítulos</button>
         <button onClick={() => setTab("duplicados")} style={tabS(tab === "duplicados")}>Duplicados</button>
         <button onClick={() => setTab("respaldo")} style={tabS(tab === "respaldo")}>Respaldo</button>
+        <button onClick={() => setTab("carpetas")} style={tabS(tab === "carpetas")}>Carpetas</button>
       </div>
 
       {tab === "respaldo" && <Respaldo />}
+      {tab === "carpetas" && <CarpetasDeArchivos />}
 
       {tab === "rubros" && (
         <div>
