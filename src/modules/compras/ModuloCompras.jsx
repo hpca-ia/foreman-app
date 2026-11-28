@@ -11,6 +11,8 @@ import BuscadorDeGastos from "../../components/BuscadorDeGastos";
 import { filtrarGastos, sumar } from "../../lib/filtrarGastos";
 import Proformas from "./Proformas";
 import { montoDeSolicitud } from "../controlObra/calculos";
+import { abiertosDe, papelesDelControl } from "./datosDePendientes";
+import { faltaElPapel, TIPOS_PENDIENTE } from "./pendientes.js";
 
 // Compras: lo que hace falta en obra, pedido, aprobado y comprado.
 //
@@ -45,6 +47,10 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // Las proformas de todos los pedidos visibles: ahí está la plata cuando
   // nadie llegó a elegir una.
   const [adjuntos, setAdjuntos] = useState([]);
+  // Lo que le falta a una compra ya hecha (migración 200): los pendientes
+  // abiertos, por compra, y las facturas del control para ver si tienen papel.
+  const [pendientes, setPendientes] = useState({});
+  const [papeles, setPapeles] = useState({});
   const gestionaCompras = puede("compras.gestionar");
   const esDirector = currentUser?.role === "owner";
   // Aprobar tiene su propio permiso. Antes colgaba de "Asignar tareas a
@@ -75,6 +81,8 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
         .select("id,solicitud_id,monto,proveedor,tipo").in("solicitud_id", ids);
       setAdjuntos(ad || []);
     } else setAdjuntos([]);
+    abiertosDe(ids).then(setPendientes, () => {});
+    papelesDelControl((s || []).map(x => x.factura_id)).then(setPapeles, () => {});
     setSinTablas(falta);
     setProyectos((ls || []).filter(l => l.resultado !== "perdido"));
     setCargando(false);
@@ -127,9 +135,16 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // Con red: si no hay nadie que compre, vuelven a ser suyas, porque lo que no
   // tiene dueño no puede quedar esperando a nadie.
   const comproYo = (leToca ? leToca("compras.gestionar") : gestionaCompras) || !hayQuienCompre;
+  // Lo pendiente de una compra hecha: lo que alguien dejó escrito, o lo que
+  // FOREMAN ve solo (una factura sin papel ni número).
+  const pendientesDe = s => pendientes[s.id] || [];
+  const faltaSolo = s => faltaElPapel(s, papeles[s.factura_id]);
+  const tienePendiente = s => pendientesDe(s).length > 0 || !!faltaSolo(s);
   const meToca = s => {
     // La devuelta que ya tiene su cotización nueva espera a quien la puede reactivar.
     if (leTocaReactivarla({ solicitud: s, conNueva: conNueva.has(s.id), esAdmin: esAdmin(currentUser?.role) })) return true;
+    // Un pendiente de una compra hecha que se dejó para esta persona.
+    if (pendientesDe(s).some(p => Number(p.para_id) === Number(currentUser.id))) return true;
     if (s.estado === "pendiente_aprobacion") return apruebo;
     if (s.estado === "aprobada") return comproYo;
     if (s.estado === "borrador" || s.estado === "requiere_info" || s.estado === "comprada") {
@@ -144,7 +159,6 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
     compra: s, usuarioId: currentUser.id, nivel: asignados.has(s.lead_id) ? "editar" : null, todasLasObras,
   }));
 
-  const abiertas = visibles.filter(s => ABIERTAS.includes(s.estado) || s.estado === "borrador");
   // Las cuatro preguntas que uno se hace todos los días, y "todas" para el
   // resto. Antes "aprobadas" y "pagadas" había que buscarlas en la lista.
   //
@@ -153,7 +167,7 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // pagada puede estar en cualquier estado y aun así es lo que uno busca
   // cuando pregunta "¿qué ya pagamos?".
   const CUADROS = [
-    { id: "mias",      label: "Me toca a mí", filtra: s => ABIERTAS.concat("borrador").includes(s.estado) && meToca(s) },
+    { id: "mias",      label: "Me toca a mí", filtra: s => (ABIERTAS.concat("borrador").includes(s.estado) || pendientesDe(s).length > 0) && meToca(s) },
     { id: "abiertas",  label: "Abiertas",     filtra: s => ABIERTAS.includes(s.estado) || s.estado === "borrador" },
     { id: "aprobadas", label: "Aprobadas",    filtra: s => s.estado === "aprobada" },
     // DEVUELTAS. Es la cola que de verdad se atasca: un pedido rebotado no le
@@ -161,6 +175,9 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
     // propia había que acordarse de que existen.
     { id: "devueltas", label: "Devueltas",    filtra: s => s.estado === "requiere_info" },
     { id: "pagadas",   label: "Pagadas",      filtra: s => !!s.pagado_at },
+    // COMPRADAS O RECIBIDAS QUE NO ESTÁN CERRADAS (Hernán, 28/11/2026: «que
+    // no esté cerrada aún la compra, que salga que tiene algo pendiente»).
+    { id: "pendientes", label: "Con pendientes", filtra: tienePendiente },
     { id: "todas",     label: "Todas",        filtra: () => true },
   ];
   const cuadro = CUADROS.find(c => c.id === filtro) || CUADROS[0];
@@ -177,7 +194,7 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   const listas = porNumero.length ? [...porNumero, ...porTexto.filter(s => Number(s.id) !== elNumero)] : porTexto;
   const sumaListas = sumar(listas);
 
-  const pendientesMias = abiertas.filter(meToca).length;
+  const pendientesMias = visibles.filter(s => (ABIERTAS.includes(s.estado) || s.estado === "borrador" || pendientesDe(s).length > 0) && meToca(s)).length;
   // Los estados que quedan por mirar dentro de lo elegido. Los que ya son un
   // cuadro de arriba no se repiten acá: dos fichas que hacen lo mismo en la
   // misma pantalla obligan a preguntarse en qué se diferencian.
@@ -310,6 +327,13 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                   {/* A quién espera. La devuelta que ya tiene su cotización nueva espera a quien da el visto, no a quien la pidió. */}
                   {e.quien && !s.pagado_at && <span style={{ color: colors.muted, fontWeight: 400 }}> · {conNueva.has(s.id) ? "quien da el visto" : e.quien}</span>}
                   {/* Devuelta, pero ya llegó la cotización que se pidió y nadie la reenvió. */}
+                  {tienePendiente(s) && (
+                    <div className="compra-con-pendiente" style={{ color: colors.warning, fontWeight: 600, fontSize: 10.5 }}>
+                      {pendientesDe(s).length
+                        ? `pendiente: ${pendientesDe(s).map(p => TIPOS_PENDIENTE[p.tipo]?.corto || "pendiente").join(", ")}${pendientesDe(s)[0].para_nombre ? ` · ${pendientesDe(s)[0].para_nombre}` : ""}`
+                        : faltaSolo(s).toLowerCase()}
+                    </div>
+                  )}
                   {conNueva.has(s.id) && (
                     <div className="con-cotizacion-nueva" style={{ color: colors.warning, fontWeight: 600, fontSize: 10.5 }}>
                       tiene una cotización nueva{esAdmin(currentUser?.role) ? ": abrila y reactivala para darle el visto" : ""}

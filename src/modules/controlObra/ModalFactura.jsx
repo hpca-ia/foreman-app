@@ -23,6 +23,7 @@ import { desdeLecturaDeFactura } from "./itemsComprados";
 // La factura también se comprueba con su propia aritmética: suma de renglones
 // = base imponible, y si no cierra, se vuelve a leer diciendo cuánto falta.
 import { leerHastaQueCuadre } from "../lectura/insistir.js";
+import HiloDeLaCompra from "../compras/HiloDeLaCompra";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 import { totalesDeLectura, renglonesDeLectura, revisionDeFactura, cuadraConIva } from "./cuadrarFactura.js";
 // Lo repartido no puede sumar más que la factura: la regla vive ahí.
@@ -797,6 +798,10 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
             }));
           }} />
       )}
+
+      {/* De qué compra salió, si le falta algo y lo que se dijo
+          (Hernán, 28/11/2026: «que lo vean en el thread de la factura»). */}
+      {factura?.id && <HiloDeLaCompra facturaId={factura.id} currentUser={currentUser} />}
 
       {/* LEER CON NOVA TAMBIÉN AL EDITAR.
           Estaba solo al crear una factura, y eso deja afuera el caso normal:

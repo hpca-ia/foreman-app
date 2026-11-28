@@ -27,6 +27,7 @@ import { leerProforma, leerDocumentoDeCompra, proveedorCanonico } from "./leerPr
 import { numeroDeCompra, tituloDelPaso, ultimaDevolucion, cotizacionesDesdeQueSeDevolvio, vuelveSolaAlSubir, puedeReactivar,
   NOTA_AL_REACTIVAR, NOTA_AL_VOLVER_SOLA } from "./devueltas.js";
 import { esAdmin } from "../../lib/roles";
+import PendientesDeCompra from "./PendientesDeCompra";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -203,6 +204,7 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
     || (esMia && !["comprada", "recibida"].includes(estado)));
 
   useEffect(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
+  const recargarHistorial = useCallback(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -845,6 +847,13 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       </div>
 
       {editando && <LineaDePasos s={viva} />}
+
+      {/* Comprada o recibida no es cerrada: la factura que no llegó, una
+          devolución (Hernán, 28/11/2026). */}
+      {editando && (estado === "comprada" || estado === "recibida") && (
+        <PendientesDeCompra solicitud={viva} users={users} currentUser={currentUser}
+          onHistorial={recargarHistorial} onCambio={onCambio} />
+      )}
 
       {/* QUÉ TE TOCA AHORA.
           La línea de pasos dice dónde está la compra; esto dice qué hay que
@@ -1665,7 +1674,9 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         )}
 
         {/* Un comentario acompaña cada paso; al devolver, es obligatorio. */}
-        {editando && estado !== "recibida" && (
+        {/* También en una recibida: «aún no me llega la factura» se dice acá
+            (Hernán, 28/11/2026). Una anulada ya no tiene a quién avisar. */}
+        {editando && estado !== "anulada" && (
           <div>
             <label style={lbl}>COMENTARIO</label>
             <textarea value={comentario} onChange={ev => setComentario(ev.target.value)} rows={2}

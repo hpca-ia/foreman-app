@@ -709,7 +709,9 @@ export async function facturarCompra(solicitud, datos, quien) {
     detalle: solicitud.descripcion,
     justificacion: solicitud.justificacion || null,
     total,
-    origen: "manual",
+    // «nova» solo cuando el papel lo leyó NOVA y se registra tal cual: desde
+    // un pendiente de la compra (pendientes.js).
+    origen: datos.origen === "nova" ? "nova" : "manual",
     subido_por: quien?.id ?? null, subido_por_nombre: quien?.name || null,
   };
   let { data: factura, error } = await supabase.from("obra_facturas").insert(fila).select().single();

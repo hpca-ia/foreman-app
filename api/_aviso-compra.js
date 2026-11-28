@@ -11,7 +11,12 @@
 // al que acaba de escribir. Sin copiar a toda la oficina, que es como se
 // enseña a ignorar los correos.
 //
-// POST { solicitudId, texto, autorId }
+// POST { solicitudId, texto, autorId, pendiente? }
+//
+// Con `pendiente` ({ tipo, paraId, paraNombre }) es algo que le falta a la
+// compra —la factura, una devolución— (migración 200): va además a quien lo
+// tiene que resolver y a los residentes del proyecto, que son los que están en
+// la obra cuando el proveedor manda el papel.
 
 import { sesionValida, rest } from "./_supabase.js";
 import { enviarCorreo, plantilla, texto2html, esc } from "./_correo.js";
@@ -23,7 +28,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Método no permitido" });
   if (!(await sesionValida(req))) return res.status(401).json({ error: "Tu sesión venció. Vuelve a entrar a FOREMAN." });
 
-  const { solicitudId, texto, autorId } = req.body || {};
+  const { solicitudId, texto, autorId, pendiente } = req.body || {};
   if (!solicitudId || !String(texto || "").trim()) return res.status(400).json({ error: "Faltan datos" });
 
   try {
@@ -31,17 +36,21 @@ export default async function handler(req, res) {
       `compras_solicitudes?id=eq.${solicitudId}&select=id,descripcion,estado,monto_estimado,lead_id,solicitante_id,solicitante_nombre,aprobador_id,comprado_por`));
     if (!compra) return res.status(404).json({ error: "No se encontró la solicitud" });
 
-    const [historial, usuarios, leads] = await Promise.all([
+    const [historial, usuarios, leads, accesos] = await Promise.all([
       json(await rest(`compras_historial?solicitud_id=eq.${solicitudId}&select=usuario_id`)),
       json(await rest("usuarios?activo=eq.true&select=id,nombre,email,rol")),
       compra.lead_id ? json(await rest(`leads?id=eq.${compra.lead_id}&select=nombre`)) : Promise.resolve([]),
+      pendiente && compra.lead_id ? json(await rest(`lead_accesos?lead_id=eq.${compra.lead_id}&select=usuario_id`)) : Promise.resolve([]),
     ]);
+    const conAcceso = new Set(accesos.map(a => Number(a.usuario_id)));
+    const residentes = pendiente ? usuarios.filter(u => u.rol === "residente" && conAcceso.has(Number(u.id))).map(u => u.id) : [];
 
     // LOS INTERESADOS SON LOS DE ESTA COMPRA, no un grupo fijo. Quien la pidió,
     // quien la aprueba, quien la compra, y quienes ya dijeron algo acá adentro.
     const involucrados = new Set([
       compra.solicitante_id, compra.aprobador_id, compra.comprado_por,
       ...historial.map(h => h.usuario_id),
+      ...(pendiente ? [pendiente.paraId, ...residentes] : []),
     ].filter(Boolean).map(Number));
     involucrados.delete(Number(autorId));
 
@@ -52,22 +61,25 @@ export default async function handler(req, res) {
     if (!para.length) return res.status(200).json({ ok: true, mandados: 0 });
 
     const obra = leads?.[0]?.nombre || "";
+    const QUE = { factura: "Falta la factura", devolucion: "Devolución pendiente", otro: "Pendiente" };
+    const que = pendiente ? QUE[pendiente.tipo] || "Pendiente" : null;
     const r = await enviarCorreo({
       to: [...new Set(para)],
       responderA: autor?.email ? [autor.email] : null,
-      subject: `Comentario en la compra · ${compra.descripcion}`,
+      subject: que ? `${que} · compra N° ${compra.id} · ${compra.descripcion}` : `Comentario en la compra · ${compra.descripcion}`,
       html: plantilla({
-        titulo: "Comentario en una solicitud de compra",
+        titulo: que ? `${que} en la compra N° ${compra.id}` : "Comentario en una solicitud de compra",
         subtitulo: [obra, compra.descripcion].filter(Boolean).join(" · "),
         cuerpo: `
           <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
-            <strong>${esc(autor?.nombre || "Alguien")}</strong> escribió sobre esta compra:
+            <strong>${esc(autor?.nombre || "Alguien")}</strong> ${que ? `dejó un pendiente en esta compra${pendiente.paraNombre ? ` para <strong>${esc(pendiente.paraNombre)}</strong>` : ""}` : "escribió sobre esta compra"}:
           </p>
           <div style="font-size:14px;color:#1A1A1A;line-height:1.6;padding:12px 14px;background:#F4F7F6;
             border:1px solid #CFE0DC;border-radius:8px">${texto2html(texto)}</div>
           <p style="margin:14px 0 0;font-size:13px;color:#555">
-            La solicitud sigue donde estaba: nadie la aprobó ni la devolvió. Queda en su historial,
-            con el nombre y la hora.
+            ${que
+              ? `La compra queda marcada como pendiente hasta que se resuelva. ${pendiente.tipo === "otro" ? "" : "Se cierra subiendo el papel en la compra: NOVA lo lee y queda registrado."}`
+              : "La solicitud sigue donde estaba: nadie la aprobó ni la devolvió. Queda en su historial, con el nombre y la hora."}
           </p>
           <p style="margin:16px 0 0">
             <a href="${APP}" style="display:inline-block;background:#0F3D3E;color:#fff;text-decoration:none;
