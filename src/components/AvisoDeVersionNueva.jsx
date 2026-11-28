@@ -67,9 +67,14 @@ export default function AvisoDeVersionNueva({ vista = "" }) {
   }, []);
 
   if (!hay) return null;
+  // DEBAJO DE LAS VENTANAS. Hernán, 27/11/2026, desde el iPad: asignaba una
+  // factura a un rubro y «Guardar cambios» no hacía nada. La franja estaba
+  // encima de todo, y en el ancho del iPad baja a dos renglones y cubre justo
+  // el botón de abajo de la ventana: el toque le caía a ella. Con 290 queda
+  // por debajo de cualquier ventana (300 para arriba) y aparece al cerrarla.
   return (
     <div className="hay-version-nueva" role="status"
-      style={{ position: "fixed", left: "50%", bottom: 14, transform: "translateX(-50%)", zIndex: 9000, maxWidth: "calc(100vw - 24px)",
+      style={{ position: "fixed", left: "50%", bottom: 14, transform: "translateX(-50%)", zIndex: 290, maxWidth: "calc(100vw - 24px)",
         display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "#0F3D3E", color: "#fff", borderRadius: 10,
         padding: "9px 12px", fontFamily: "'Inter', sans-serif", fontSize: 12.5, lineHeight: 1.4, boxShadow: "0 8px 30px rgba(15,23,42,0.3)" }}>
       <span>
