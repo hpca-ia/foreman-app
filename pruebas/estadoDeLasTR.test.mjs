@@ -37,7 +37,7 @@ test("la ODC6: su factura no tiene papel ni número", () => {
 
 test("la ODC8: dice que tiene factura y en el control ya no está", () => {
   const r = resumenDeTR({ leadId: 15, facturas: [], solicitudes: [{ id: 8, tr: 24, estado: "recibida", factura_id: 27, descripcion: "VIVIENDA", monto: 575 }] });
-  assert.deepEqual(errores(una(r, 24)), ["factura_borrada"]);
+  assert.deepEqual(errores(una(r, 24)), ["factura_borrada", "sin_asignar"]);
   assert.equal(una(r, 24).grave, true);
   // El monto es el de la orden: no hay gasto hecho que mostrar.
   assert.equal(una(r, 24).montoEsEstimado, true);
@@ -45,8 +45,8 @@ test("la ODC8: dice que tiene factura y en el control ya no está", () => {
 
 test("una orden comprada sin factura es un error; una sin comprar está en curso", () => {
   const r = resumenDeTR({ leadId: 15, solicitudes: [
-    { id: 1, tr: 1, estado: "comprada", factura_id: null, descripcion: "cemento" },
-    { id: 2, tr: 2, estado: "aprobada", factura_id: null, descripcion: "varilla" },
+    { id: 1, tr: 1, estado: "comprada", factura_id: null, descripcion: "cemento", capitulo: "Albañilería" },
+    { id: 2, tr: 2, estado: "aprobada", factura_id: null, descripcion: "varilla", obra_rubro_id: 40 },
     { id: 3, tr: 3, estado: "anulada", factura_id: null, descripcion: "no va" },
   ] });
   assert.deepEqual(errores(una(r, 1)), ["sin_factura"]);
@@ -126,4 +126,22 @@ test("sin la 202 nadie tiene TR: igual se agrupan por sus enganches", () => {
 
 test("cada error tiene qué decir y qué hacer", () => {
   for (const [k, e] of Object.entries(ERRORES_TR)) assert.ok(e.corto && e.hacer, k);
+});
+
+test("la orden de compra que no dice contra qué rubro va, se alerta; con destino o con factura, no", () => {
+  const r = resumenDeTR({ leadId: 15,
+    facturas: [{ ...completa, id: 300, tr: 4, caja_gasto_id: null }],
+    solicitudes: [
+      { id: 1, tr: 1, estado: "aprobada", descripcion: "sin destino" },
+      { id: 2, tr: 2, estado: "aprobada", descripcion: "con agrupación", obra_actividad_id: 7 },
+      { id: 3, tr: 3, estado: "anulada", descripcion: "anulada sin destino" },
+      // Ya tiene factura: manda lo asignado en el documento, no el destino de la orden.
+      { id: 4, tr: 4, estado: "recibida", factura_id: 300, descripcion: "facturada" },
+    ] });
+  assert.deepEqual(errores(una(r, 1)), ["sin_asignar"]);
+  assert.equal(una(r, 1).errores[0].dice, "ODC1 no dice contra qué rubro va");
+  assert.equal(una(r, 1).estado, "con_error");
+  assert.equal(una(r, 2).estado, "en_curso");
+  assert.equal(una(r, 3).estado, "anulada");
+  assert.equal(una(r, 4).estado, "completa");
 });

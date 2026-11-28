@@ -71,11 +71,53 @@ export async function pagosDeObra(obraId) {
   return { pagos: data || [], sinTablas: false };
 }
 
+// EL COMPROBANTE DEL PAGO (migración 203). Hernán, 28/11/2026: el pago
+// guardaba fecha, forma y referencia, pero no el papel; «sí, agrega subir».
+export const SIN_MIGRACION_203 = "Falta correr la migración 203 en Supabase para guardar el comprobante del pago.";
+
+/** Sube el comprobante al depósito, en la carpeta de la obra. */
+async function subirComprobante(obraId, archivo) {
+  const limpio = String(archivo.name || "comprobante").replace(/[^\w.-]/g, "_").slice(-60);
+  const ruta = `obra-${obraId}/pago-${Date.now()}-${limpio}`;
+  const { error } = await supabase.storage.from("task-files").upload(ruta, archivo, { upsert: false });
+  if (error) return { error: "No se pudo subir el comprobante: " + error.message };
+  return { ruta, nombre: archivo.name || "comprobante" };
+}
+
+/**
+ * Ponerle el comprobante a un pago que ya está registrado, o cambiárselo.
+ * El archivo anterior, si había, se quita del depósito.
+ */
+export async function ponerComprobante(pago, archivo) {
+  if (!archivo) return { error: "Elegí el archivo del comprobante." };
+  const subido = await subirComprobante(pago.obra_id, archivo);
+  if (subido.error) return subido;
+  const { error } = await supabase.from("obra_pagos")
+    .update({ archivo_url: subido.ruta, archivo_nombre: subido.nombre }).eq("id", pago.id);
+  if (error) {
+    await supabase.storage.from("task-files").remove([subido.ruta]);
+    return { error: falta(error) ? SIN_MIGRACION_203 : error.message };
+  }
+  if (pago.archivo_url && pago.archivo_url !== subido.ruta) await supabase.storage.from("task-files").remove([pago.archivo_url]);
+  return { ok: true, archivo_url: subido.ruta, archivo_nombre: subido.nombre };
+}
+
+/**
+ * @param datos.archivo  el comprobante (opcional): la transferencia, la foto
+ *   del cheque. Si no se puede guardar, el pago se registra igual y se avisa
+ *   en `aviso`: perder el pago por culpa del papel sería peor.
+ */
 export async function registrarPago(factura, datos, quien) {
   const monto = Number(datos.monto);
   if (!(monto > 0)) return { error: "Escribí cuánto se pagó." };
 
-  const { data, error } = await supabase.from("obra_pagos").insert({
+  let comprobante = null, aviso = "";
+  if (datos.archivo) {
+    const subido = await subirComprobante(factura.obra_id, datos.archivo);
+    if (subido.error) aviso = subido.error; else comprobante = subido;
+  }
+  const conPapel = comprobante ? { archivo_url: comprobante.ruta, archivo_nombre: comprobante.nombre } : {};
+  const fila = {
     factura_id: factura.id, obra_id: factura.obra_id,
     fecha: datos.fecha || new Date().toISOString().split("T")[0],
     monto, forma: datos.forma || null, referencia: datos.referencia?.trim() || null,
@@ -86,9 +128,19 @@ export async function registrarPago(factura, datos, quien) {
     // en otra pantalla, y nadie podía saber en qué factura se fue.
     ...(datos.nota_credito_id ? { nota_credito_id: Number(datos.nota_credito_id) } : {}),
     registrado_por: quien?.id ?? null, registrado_nombre: quien?.name || null,
-  }).select().single();
-  if (error) return { error: falta(error) ? "Falta correr la migración 060." : error.message };
-  return { pago: data };
+  };
+  let { data, error } = await supabase.from("obra_pagos").insert({ ...fila, ...conPapel }).select().single();
+  // Sin la 203 el pago entra sin su papel, y se dice.
+  if (error && comprobante && falta(error)) {
+    await supabase.storage.from("task-files").remove([comprobante.ruta]);
+    aviso = SIN_MIGRACION_203;
+    ({ data, error } = await supabase.from("obra_pagos").insert(fila).select().single());
+  }
+  if (error) {
+    if (comprobante) await supabase.storage.from("task-files").remove([comprobante.ruta]);
+    return { error: falta(error) ? "Falta correr la migración 060." : error.message };
+  }
+  return aviso ? { pago: data, aviso: `El pago se guardó, pero sin el comprobante. ${aviso}` } : { pago: data };
 }
 
 export async function borrarPago(id) {

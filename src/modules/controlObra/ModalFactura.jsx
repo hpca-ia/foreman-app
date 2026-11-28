@@ -70,7 +70,7 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   const [revisandoSri, setRevisandoSri] = useState(false);
   // Lo que ya se pagó de esta factura, en el momento de cargarla: es cuando se
   // sabe, porque quien la carga tiene el comprobante en la mano.
-  const [pagado, setPagado] = useState({ monto: "", forma: "transferencia" });
+  const [pagado, setPagado] = useState({ monto: "", forma: "transferencia", archivo: null });
   // LOS VALES DE ESTE PROVEEDOR, ACÁ MISMO.
   //
   // Una factura de $1.000 se paga $900 por transferencia y $100 con una nota
@@ -660,13 +660,15 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
     if (!editando && n(pagado.monto) > 0) {
       const r = await registrarPago(
         { id: facturaId, obra_id: obra.id },
-        { monto: n(pagado.monto), fecha: payload.fecha, forma: pagado.forma },
+        { monto: n(pagado.monto), fecha: payload.fecha, forma: pagado.forma, archivo: pagado.archivo },
         currentUser);
       if (r?.error) {
         setGuardando(false);
         setError("La factura se guardó, pero el pago no: " + r.error);
         return;
       }
+      // El pago entró y su comprobante no: se dice, y se le pone desde Proveedores.
+      if (r?.aviso) window.alert(r.aviso + "\n\nSe le puede poner después, desde Proveedores.");
     }
 
     // LO QUE SE PAGÓ CON EL VALE. Es un pago más —la factura queda saldada—
@@ -1077,6 +1079,17 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
               </span>
             </div>
           </div>
+          {/* EL COMPROBANTE DE ESE PAGO (Hernán, 28/11/2026: «sí, agrega
+              subir»): la transferencia o la foto del cheque. Va detrás en el
+              expediente de la TR. */}
+          {n(pagado.monto) > 0 && pagado.forma !== "nota de crédito" && (
+            <label className="adjuntar-comprobante" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", marginTop: 7,
+              fontSize: 11.5, color: pagado.archivo ? colors.ink : colors.inkSoft, border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "5px 9px", background: "#fff" }}>
+              📎 {pagado.archivo ? pagado.archivo.name : "Adjuntar el comprobante del pago (opcional)"}
+              <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+                onChange={e => { const archivo = e.target.files?.[0] || null; e.target.value = ""; setPagado(p => ({ ...p, archivo })); }} />
+            </label>
+          )}
           {/* Y SI UNA PARTE SE PAGÓ CON UN VALE. No salió del banco: salió del
               crédito que este proveedor nos debía, y ese crédito deja de estar
               disponible por ese monto. Los dos pagos saldan la factura. */}

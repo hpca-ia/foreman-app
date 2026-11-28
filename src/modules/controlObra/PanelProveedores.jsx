@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Trash2, FileText, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, FileText, AlertTriangle, Paperclip } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Traza from "../../components/Traza";
@@ -8,7 +8,7 @@ import { inputStyle } from "../../components/ui/Input";
 import { abrirArchivo } from "../../lib/archivos";
 import { fmt } from "./calculos";
 import {
-  CLASES_DOC, FORMAS_PAGO, ETIQUETA_PAGO, pagosDeObra, registrarPago, borrarPago,
+  CLASES_DOC, FORMAS_PAGO, ETIQUETA_PAGO, pagosDeObra, registrarPago, borrarPago, ponerComprobante,
   guardarDocumento, pagadoPorFactura, estadoDe, cuentasPorProveedor, totalesPorPagar,
   esNotaDeCredito, valesDisponibles,
 } from "./pagos";
@@ -22,7 +22,7 @@ import {
 // Gastado y pagado no son lo mismo: una factura con un anticipo del 40% ya
 // golpeó el rubro entero, pero el resto todavía tiene que salir de caja.
 
-const PAGO_VACIO = { monto: "", fecha: new Date().toISOString().split("T")[0], forma: "transferencia", referencia: "", nota: "", nota_credito_id: "" };
+const PAGO_VACIO = { monto: "", fecha: new Date().toISOString().split("T")[0], forma: "transferencia", referencia: "", nota: "", nota_credito_id: "", archivo: null };
 const estiloChip = {
   border: `1px solid ${colors.border}`, background: "#fff", color: colors.inkSoft, borderRadius: 12,
   padding: "1px 8px", fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,
@@ -38,6 +38,8 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
   const [form, setForm] = useState(PAGO_VACIO);
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState("");
+  // El pago al que se le está subiendo el comprobante.
+  const [subiendo, setSubiendo] = useState(null);
 
   const puedeRegistrar = puede?.("facturas.registrar") !== false;
 
@@ -331,6 +333,29 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                           <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                             {p.forma || "pago"}{p.nota_credito_id ? " (no salió del banco)" : ""}{p.referencia ? ` · ${p.referencia}` : ""}{p.nota ? ` · ${p.nota}` : ""}
                           </span>
+                          {/* EL COMPROBANTE DEL PAGO (Hernán, 28/11/2026: «sí, agrega
+                              subir»): se ve si lo tiene, y si no, se le pone acá. */}
+                          {p.archivo_url ? (
+                            <button className="ver-comprobante" onClick={() => abrirArchivo(p.archivo_url, { nombre: p.archivo_nombre })} title={p.archivo_nombre || "Ver el comprobante"}
+                              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 10.5, color: colors.brand, textDecoration: "underline", whiteSpace: "nowrap" }}>
+                              comprobante
+                            </button>
+                          ) : puedeRegistrar && !p.nota_credito_id ? (
+                            <label className="subir-comprobante" title="Subir la transferencia o la foto del cheque"
+                              style={{ display: "inline-flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 10.5, color: colors.muted, whiteSpace: "nowrap" }}>
+                              <Paperclip size={10} /> {subiendo === p.id ? "subiendo…" : "subir comprobante"}
+                              <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} disabled={subiendo === p.id}
+                                onChange={async e => {
+                                  const archivo = e.target.files?.[0]; e.target.value = "";
+                                  if (!archivo) return;
+                                  setSubiendo(p.id); setAviso("");
+                                  const r = await ponerComprobante(p, archivo);
+                                  setSubiendo(null);
+                                  if (r.error) { setAviso(r.error); return; }
+                                  await cargar();
+                                }} />
+                            </label>
+                          ) : null}
                           <span style={{ fontWeight: 600 }}>${fmt(p.monto)}</span>
                           {puedeRegistrar && (
                             <button onClick={async () => { if (window.confirm("¿Quitar este pago?")) { await borrarPago(p.id); await cargar(); } }}
@@ -385,6 +410,14 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                                 </select>
                               );
                             })()}
+                            {form.forma !== "nota de crédito" && (
+                              <label className="adjuntar-comprobante" style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 11.5, color: form.archivo ? colors.ink : colors.inkSoft,
+                                border: `1px dashed ${colors.border}`, borderRadius: 7, padding: "5px 9px", background: "#fff" }}>
+                                <Paperclip size={12} /> {form.archivo ? form.archivo.name : "Adjuntar el comprobante: la transferencia o la foto del cheque (opcional)"}
+                                <input type="file" accept="image/*,application/pdf" style={{ display: "none" }}
+                                  onChange={e => { const archivo = e.target.files?.[0] || null; e.target.value = ""; setForm(f => ({ ...f, archivo })); }} />
+                              </label>
+                            )}
                             <div style={{ display: "flex", gap: 5 }}>
                               <Button variant="primary" size="sm" disabled={ocupado || !(Number(form.monto) > 0)}
                                 onClick={async () => {
@@ -406,6 +439,8 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                                   const r = await registrarPago(d, { ...form, nota_credito_id: vale }, currentUser);
                                   setOcupado(false);
                                   if (r.error) { setAviso(r.error); return; }
+                                  // El pago entró; si el comprobante no, se dice.
+                                  if (r.aviso) setAviso(r.aviso);
                                   setPagando(null); setForm(PAGO_VACIO); await cargar();
                                 }}>Guardar pago</Button>
                               <Button variant="secondary" size="sm" onClick={() => { setPagando(null); setForm(PAGO_VACIO); }}>Cancelar</Button>

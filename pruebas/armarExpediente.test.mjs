@@ -82,7 +82,8 @@ test("cada parte tiene su cuadro: orden, caja chica, control, asignación y pago
   assert.equal(bloque(e, "En el control de obra").filas[0][5], "PL1 (cerrada)");
   // Lo que falta asignar se dice: $161 del documento, $150 asignados.
   assert.deepEqual(bloque(e, "Asignada a").filas, [["3.2 Estructura metálica", "$100,00"], ["Agrupación: Cubierta", "$50,00"], ["SIN ASIGNAR", "$11,00"]]);
-  assert.deepEqual(bloque(e, "Pagos").filas.at(-1), ["", "", "", "TOTAL PAGADO", "$161,00"]);
+  assert.deepEqual(bloque(e, "Pagos").filas[0], ["20/10/2026", "transferencia", "4521", "Johanna", "sin subir", "$161,00"]);
+  assert.deepEqual(bloque(e, "Pagos").filas.at(-1), ["", "", "", "TOTAL PAGADO", "", "$161,00"]);
   assert.equal(bloque(e, "Anexos").filas[0][2], "Para la viga del ingreso");
 });
 
@@ -100,7 +101,7 @@ test("lo que no está guardado no se inventa: sin pagos, sin papel, sin asignar"
     planillas: [{ id: 1, numero: 1, estado: "cerrada" }],
     pendientes: [{ tipo: "factura", texto: "no llega la factura", para_nombre: "Johanna", creado_nombre: "Hernan", created_at: "2026-11-28T10:00:00Z" }] });
   assert.equal(e.papeles.length, 0);
-  assert.deepEqual(bloque(e, "Pagos").filas, [["—", "Sin pagos registrados", "", "", "$0,00"]]);
+  assert.deepEqual(bloque(e, "Pagos").filas, [["—", "Sin pagos registrados", "", "", "", "$0,00"]]);
   assert.deepEqual(bloque(e, "Asignada a").filas, [["SIN ASIGNAR", "$184,92"]]);
   assert.equal(bloque(e, "En el control de obra").filas[0][1], "sin número");
   assert.equal(bloque(e, "Pendientes").filas[0][4], "ABIERTO");
@@ -132,4 +133,15 @@ test("el primer renglón del historial es el pedido, no una vuelta a borrador", 
   // Y la orden cuya factura se borró del control lo dice, no «todavía no».
   assert.equal(e.resumen.find(r => r.label === "Planilla").valor, "Su factura se borró del control");
   assert.equal(e.bloques.find(b => b.titulo === "Falta en el control").filas[0][0], "ODC8");
+});
+
+test("el comprobante subido al registrar el pago va detrás, y el cuadro lo dice", () => {
+  const e = armarExpediente({ ...completa, pagos: [
+    { factura_id: 77, fecha: "2026-10-20", monto: 100, forma: "transferencia", referencia: "4521", archivo_url: "obra-13/pago-1-transf.pdf", archivo_nombre: "transf.pdf" },
+    { factura_id: 77, fecha: "2026-10-21", monto: 61, forma: "nota de crédito", nota_credito_id: 9 },
+  ] });
+  assert.deepEqual(bloque(e, "Pagos").filas.map(f => f[4]), ["va detrás", "no lleva: es un vale", ""]);
+  const papel = e.papeles.find(p => p.ruta === "obra-13/pago-1-transf.pdf");
+  assert.equal(papel.titulo, "Comprobante del pago del 20/10/2026 — $100,00 — ref. 4521");
+  assert.equal(e.papeles.length, 5);
 });

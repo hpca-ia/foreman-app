@@ -91,6 +91,8 @@ export default function ResumenDeTR({ resumen, onVerTR = null }) {
             <Cuenta n={cuenta.completas} texto="completas" color={colors.success} />
             <Cuenta n={cuenta.enCurso} texto="en curso: sin comprar o sin aprobar" color={colors.inkSoft} />
             <Cuenta n={cuenta.conError} texto="con algo por resolver" color={cuenta.conError ? colors.danger : colors.muted} />
+            {/* «Que alerte si estas TR no están ligadas a rubros del control» (Hernán, 28/11/2026). */}
+            <Cuenta n={cuenta.porError.sin_asignar || 0} texto="sin rubro del control" color={cuenta.porError.sin_asignar ? colors.warning : colors.muted} />
           </div>
 
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>

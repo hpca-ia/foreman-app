@@ -202,14 +202,15 @@ export function armarExpediente(h = {}) {
     });
     bloques.push({
       titulo: "Pagos",
-      columnas: ["Fecha", "Forma", "Referencia", "Registró", "Monto"],
+      columnas: ["Fecha", "Forma", "Referencia", "Registró", "Comprobante", "Monto"],
       filas: (h.pagos || []).length
-        ? [...h.pagos.map(p => [dia(p.fecha || p.created_at), limpio(p.forma) || "—", limpio(p.referencia) || "—", limpio(p.registrado_nombre) || "—", plata(p.monto)]),
-          ["", "", "", "TOTAL PAGADO", plata(pagado)]]
-        : [["—", "Sin pagos registrados", "", "", plata(0)]],
-      anchos: { 0: { cellWidth: 62 }, 4: { cellWidth: 80, halign: "right" } },
+        ? [...h.pagos.map(p => [dia(p.fecha || p.created_at), limpio(p.forma) || "—", limpio(p.referencia) || "—", limpio(p.registrado_nombre) || "—",
+          p.archivo_url ? "va detrás" : p.nota_credito_id ? "no lleva: es un vale" : "sin subir", plata(p.monto)]),
+          ["", "", "", "TOTAL PAGADO", "", plata(pagado)]]
+        : [["—", "Sin pagos registrados", "", "", "", plata(0)]],
+      anchos: { 0: { cellWidth: 62 }, 5: { cellWidth: 80, halign: "right" } },
       filasDestacadas: (h.pagos || []).length ? [h.pagos.length] : [],
-      nota: "El comprobante de pago va detrás solo cuando se subió en la orden de compra: los pagos registrados en el control guardan fecha, forma y referencia, no el archivo.",
+      nota: "El comprobante va detrás cuando se subió al registrar el pago, o en la orden de compra. «Sin subir»: el pago guarda fecha, forma y referencia, pero nadie le puso el archivo.",
     });
   }
   if ((h.pendientes || []).length) {
@@ -237,6 +238,7 @@ export function armarExpediente(h = {}) {
   facturas.forEach(f => papel(f.archivo_url, `${CLASE[f.clase || "factura"] || "Documento"}${f.numero_factura ? ` ${f.numero_factura}` : ""} — ${f.razon_social || "sin proveedor"} — ${plata(f.total)}`));
   gastos.forEach(g => papel(g.archivo_url, `Gasto de caja chica — ${g.proveedor || "sin proveedor"} — ${plata(g.monto)}`));
   (h.adjuntos || []).filter(a => a.tipo === "pago").forEach(a => papel(a.storage_path, `Comprobante de pago${a.monto ? ` — ${plata(a.monto)}` : ""}`));
+  (h.pagos || []).forEach(p => papel(p.archivo_url, `Comprobante del pago del ${dia(p.fecha || p.created_at)} — ${plata(p.monto)}${p.referencia ? ` — ref. ${p.referencia}` : ""}`));
   (h.adjuntos || []).filter(a => a.tipo !== "cotizacion" && a.tipo !== "pago").forEach(a => papel(a.storage_path, `${ADJUNTO[a.tipo] || "Respaldo"} de la orden${a.nombre ? ` — ${a.nombre}` : ""}`));
   (h.pendientes || []).forEach(p => papel(p.doc_path, `Papel del pendiente — ${PENDIENTE[p.tipo] || "pendiente"}`));
   (h.anexos || []).forEach(a => papel(a.storage_path, `Anexo${a.nombre ? ` — ${a.nombre}` : ""}`));

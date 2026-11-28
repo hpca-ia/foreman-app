@@ -41,8 +41,11 @@ export const ERRORES_TR = {
     hacer: "Es una factura o nota de venta y no tiene el número del comprobante." },
   sin_planilla: { corto: "Sin planilla",
     hacer: "El documento está en el control pero no quedó en ninguna planilla." },
-  sin_asignar: { corto: "Sin asignar a rubro",
-    hacer: "Todo o parte del documento no descuenta de ningún rubro del presupuesto." },
+  // Hernán, 28/11/2026: «que alerte si estas TR no están ligadas a rubros del
+  // control». La factura sin asignar ya se avisaba; la orden de compra que no
+  // dice contra qué va, no.
+  sin_asignar: { corto: "Sin rubro del control",
+    hacer: "La transacción no está ligada a ningún rubro del control: el documento (todo o una parte) no descuenta de ningún rubro, o la orden de compra no dice contra qué va." },
 };
 export const ORDEN_DE_ERRORES = Object.keys(ERRORES_TR);
 
@@ -95,6 +98,11 @@ export function resumenDeTR({ leadId = null, facturas = [], solicitudes = [], ga
       if (CERRADA_SIN_GASTO.includes(s.estado)) return;
       if (s.factura_id && !facturaPorId.has(Number(s.factura_id))) pone("factura_borrada", codigoODC(s.id));
       else if (!s.factura_id && COMPRADA.includes(s.estado)) pone("sin_factura", codigoODC(s.id));
+      // Sin factura todavía, lo que la liga al control es el destino de la
+      // orden. Con factura, manda lo asignado en el documento.
+      if (!g.facturas.length && !s.obra_rubro_id && !s.obra_actividad_id && !String(s.capitulo || "").trim()) {
+        pone("sin_asignar", `${codigoODC(s.id)} no dice contra qué rubro va`);
+      }
       (pendientes[s.id] || []).forEach(p => pone("pendiente", [p.texto, p.para_nombre ? `lo resuelve ${p.para_nombre}` : ""].filter(Boolean).join(" · ")));
     });
 
