@@ -94,6 +94,8 @@ test("«UN NÚMERO DE ID PARA IDENTIFICARLAS»: el de la base, en la compra, en 
   // La tarea que le llega a cada uno lleva el número adelante: en el tablero y en el correo se sabe de cuál se habla.
   assert.equal(tituloDelPaso("Aprobar compra", N37), "Aprobar compra N° 37: Cotización de sellado y pintura de pared de fondo");
   assert.equal(tituloDelPaso("Completar la solicitud", { id: 35, descripcion: " Recubrimiento mesones de baños " }), "Completar la solicitud N° 35: Recubrimiento mesones de baños");
+  // Con su TR (migración 202), el mismo código que va a llevar su factura.
+  assert.equal(tituloDelPaso("Recibir", { id: 6, tr: 22, descripcion: "Camisas" }), "Recibir N° 6 · TR22: Camisas");
   // En el buscador se escribe como salga.
   for (const escrito of ["37", "#37", "N° 37", "n 37", "Nº37", "no. 37", " 37 "]) assert.equal(numeroBuscado(escrito), 37, escrito);
   // Lo que no es un número de compra se busca como siempre.

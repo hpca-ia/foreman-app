@@ -232,10 +232,14 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       }
 
       if (facturado.length) {
+        // EL TR VA DEBAJO DEL NÚMERO DE FACTURA, en la misma celda: dice de
+        // cuál se habla sin quitarle ancho al detalle.
+        const numeroYTr = facturado.some(f => f.tr) ? "N° factura · TR" : "N° factura";
         const columnas = todoElProyecto
-          ? ["Fecha", "Planilla", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"]
-          : ["Fecha", "Proveedor", "N° factura", "Detalle", "Rubro asignado", "Total"];
-        const fila = f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—", f.numero_factura || "—",
+          ? ["Fecha", "Planilla", "Proveedor", numeroYTr, "Detalle", "Rubro asignado", "Total"]
+          : ["Fecha", "Proveedor", numeroYTr, "Detalle", "Rubro asignado", "Total"];
+        const fila = f => [f.fecha, ...(todoElProyecto ? [planillaDe(f.planilla_id)] : []), f.razon_social || "—",
+          [f.numero_factura || "—", codigoTR(f.tr, obra.lead_id)].filter(Boolean).join("\n"),
           f.detalle || "", rubrosDeFactura(f.id) || "SIN ASIGNAR", money(Math.abs(Number(f.total) || 0))];
         const alaDerecha = { [todoElProyecto ? 6 : 5]: { halign: "right" } };
         const filasFact = facturado.map(fila);

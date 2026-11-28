@@ -1128,7 +1128,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
       </div>
 
       {subVista==="reporte"&&cajaActiva&&(
-        <ReporteCaja key={reporteDeCierre||"periodo"} caja={cajaActiva} gastos={gastos} anticipos={anticipos} cierres={cierres} usuarios={users}
+        <ReporteCaja key={reporteDeCierre||"periodo"} caja={cajaActiva} gastos={gastos} anticipos={anticipos} cierres={cierres} usuarios={users} trazas={trazas}
           cierreInicial={reporteDeCierre}/>
       )}
 

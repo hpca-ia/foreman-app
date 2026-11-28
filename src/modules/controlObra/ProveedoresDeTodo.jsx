@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { ArrowLeft, Search, X, FileText, ChevronRight, ChevronDown } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
+import { conTraza } from "../../lib/origenes";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { abrirArchivo } from "../../lib/archivos";
@@ -27,18 +29,26 @@ export default function ProveedoresDeTodo({ obras = [], nombreDeObra, onVolver }
   const [obraAbierta, setObraAbierta] = useState(null); // `${clave}-${obraId}`
 
   const ids = useMemo(() => obras.map(o => o.id), [obras]);
+  const obrasRef = useRef(obras);
+  obrasRef.current = obras;
 
   useEffect(() => {
     let vivo = true;
     (async () => {
       setCargando(true);
       if (!ids.length) { setFacturas([]); setPagos([]); setCargando(false); return; }
-      const [{ data: fs }, { data: ps }] = await Promise.all([
+      const [{ data: fs }, { data: ps }, { data: pls }] = await Promise.all([
         supabase.from("obra_facturas").select("*").in("obra_id", ids),
         supabase.from("obra_pagos").select("factura_id,monto,nota_credito_id").in("obra_id", ids),
+        supabase.from("planillas").select("id,numero,nombre,estado").in("obra_id", ids),
       ]);
       if (!vivo) return;
       setFacturas(fs || []); setPagos(ps || []); setCargando(false);
+      // Cada documento con su traza (TR, orden de compra o caja, planilla).
+      // Después de mostrar: si falla, la lista queda como estaba.
+      const leadPorObra = {};
+      obrasRef.current.forEach(o => { leadPorObra[o.id] = o.lead_id; });
+      conTraza(fs || [], null, pls || [], leadPorObra).then(con => { if (vivo) setFacturas(con); }, () => {});
     })();
     return () => { vivo = false; };
   }, [ids]);
@@ -130,6 +140,7 @@ export default function ProveedoresDeTodo({ obras = [], nombreDeObra, onVolver }
                           </span>
                           <span style={{ flex: 1, minWidth: 110, color: colors.inkSoft, overflowWrap: "anywhere" }}>
                             {d.numero_factura ? `${d.numero_factura} · ` : ""}{d.detalle || "sin detalle"}
+                            {d._traza && <Traza t={d._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                           </span>
                           {d.archivo_url && (
                             <button onClick={() => abrirArchivo(d.archivo_url, { nombre: d.archivo_nombre })} title={d.archivo_nombre || "Ver el respaldo"}

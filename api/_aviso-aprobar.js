@@ -122,7 +122,9 @@ export default async function handler(req, res) {
 
     const html = plantilla({
       titulo: compra ? `Aprobar la compra: ${compra.descripcion}` : tarea.title,
-      subtitulo: [obra, compra?.urgente ? "URGENTE" : null].filter(Boolean).join(" · ") || undefined,
+      // Con su código (migración 202): «PR15-TR22 · ODC6». Sin la 202 no hay TR y no se escribe.
+      subtitulo: [obra, compra?.tr ? `${compra.lead_id ? `PR${compra.lead_id}-` : ""}TR${compra.tr} · ODC${compra.id}` : null,
+        compra?.urgente ? "URGENTE" : null].filter(Boolean).join(" · ") || undefined,
       cuerpo: `
         ${/* LO QUE SE LE PIDE, ARRIBA. Quien abre esto desde el correo quiere
              saber en dos segundos qué tiene que hacer. */ ""}

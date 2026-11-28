@@ -7,13 +7,18 @@ import SelectorContenido, { CONTENIDO, contenidoQueSale } from "../../components
 import { exportarExcel, exportarPDF, construirPDF, money } from "../../lib/exportar";
 import { enlaceArchivo, enlacesArchivos, subirArchivo } from "../../lib/archivos";
 import { contenidoDelReporte, cierresParaElegir } from "./reporte.js";
+import { codigoTR, trazaEnTexto } from "../../lib/trazabilidad";
 
 const primerDiaMes = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]; };
 const hoy = () => new Date().toISOString().split("T")[0];
 
 // POR PERÍODO O POR CIERRE (qué entra en cada uno: reporte.js). `cierreInicial`
 // es el cierre desde el que se abrió el reporte, si se abrió desde uno.
-export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usuarios = [], cierreInicial = null }) {
+export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usuarios = [], cierreInicial = null, trazas = {} }) {
+  // El código de cada gasto: su TR con el proyecto, y en el Excel la traza
+  // entera (orden de compra, caja, planilla del control).
+  const tr = g => codigoTR(g.tr, caja.lead_id);
+  const trazaDe = g => trazaEnTexto(trazas[g.id]) || tr(g);
   const elegibles = useMemo(() => cierresParaElegir(cierres), [cierres]);
   const [modo, setModo] = useState(cierreInicial ? "cierre" : "periodo");
   const [cierreId, setCierreId] = useState(cierreInicial ? String(cierreInicial) : "");
@@ -53,18 +58,18 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
         [`CAJA CHICA — ${caja.proyecto_nombre}`],
         [`Responsable: ${caja.responsable_nombre}`, "", rotulo],
         [],
-        ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "CAPÍTULO", "TIPO", "MONTO", "ESTADO", "SUBIÓ", "ADJUNTO"],
+        ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "CAPÍTULO", "TIPO", "MONTO", "ESTADO", "SUBIÓ", "ADJUNTO", "TR"],
         ...gastosF.map(g => [g.fecha, g.proveedor || "", g.ruc || "", g.numero_factura || "",
           g.descripcion || "", g.capitulo || "", g.tipo || "", Number(g.monto) || 0,
-          g.estado || "pendiente", g.subido_por_nombre || "", g.archivo_url ? "Sí" : "No"]),
+          g.estado || "pendiente", g.subido_por_nombre || "", g.archivo_url ? "Sí" : "No", trazaDe(g)]),
         [],
         ["", "", "", "", "", "", "TOTAL GASTOS", totalGastos],
         ...(devueltosF.length ? [
           [],
           ["DEVUELTOS AL RESIDENTE — fuera de la cuenta hasta que se corrijan"],
-          ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "MOTIVO", "", "MONTO"],
+          ["FECHA", "PROVEEDOR", "RUC", "N° FACTURA", "DESCRIPCIÓN", "MOTIVO", "", "MONTO", "", "", "", "TR"],
           ...devueltosF.map(g => [g.fecha, g.proveedor || "", g.ruc || "", g.numero_factura || "",
-            g.descripcion || "", g.devuelto_motivo || "", "", Number(g.monto) || 0]),
+            g.descripcion || "", g.devuelto_motivo || "", "", Number(g.monto) || 0, "", "", "", trazaDe(g)]),
           ["", "", "", "", "", "", "TOTAL DEVUELTO (no suma)", totalDevueltos],
         ] : []),
       ];
@@ -128,7 +133,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
       ];
 
       await exportarExcel(archivo, [
-        { nombre: "Gastos", filas: filasGastos, anchos: [11, 28, 14, 18, 42, 24, 12, 12, 12, 16, 9] },
+        { nombre: "Gastos", filas: filasGastos, anchos: [11, 28, 14, 18, 42, 24, 12, 12, 12, 16, 9, 34] },
         { nombre: porCierre ? "Entregado" : "Anticipos", filas: filasAnticipos, anchos: [11, 30, 40, 20, 12] },
         ...(cierresF.length ? [{ nombre: porCierre ? "Cierre" : "Cierres", filas: filasCierres, anchos: [5, 11, 8, 12, 12, 12, 18, 30] }] : []),
         { nombre: "Resumen", filas: filasResumen, anchos: [36, 16] },
@@ -139,8 +144,10 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
   async function datosPDF(modo = sale) {
     const bloques = [{
         titulo: porCierre ? `Gastos del cierre N° ${r.cierre?.numero}` : "Gastos del período",
-        columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
-        filas: gastosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", g.numero_factura || "—",
+        // EL TR VA DEBAJO DEL NÚMERO DE FACTURA: la hoja ya va justa de ancho
+        // y una columna más le quitaría lugar a la descripción.
+        columnas: ["Fecha", "Proveedor", tr(gastosF[0] || {}) ? "N° factura · TR" : "N° factura", "Descripción", "Capítulo", "Estado", "Monto"],
+        filas: gastosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", [g.numero_factura || "—", tr(g)].filter(Boolean).join("\n"),
           // ENTERA. Se cortaba a 55 letras —«cortadora de p», «prevención de
           // riesg»— con media hoja libre al lado: la tabla baja de renglón sola.
           g.descripcion || "", g.capitulo || "—", g.estado || "pendiente", money(g.monto)]),
@@ -151,7 +158,7 @@ export default function ReporteCaja({ caja, gastos, anticipos, cierres = [], usu
         bloques.push({
           titulo: "Devueltos al residente — fuera de la cuenta hasta que se corrijan",
           columnas: ["Fecha", "Proveedor", "N° factura", "Descripción", "Motivo", "Monto"],
-          filas: devueltosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", g.numero_factura || "—",
+          filas: devueltosF.map(g => [String(g.fecha || "").slice(0, 10), g.proveedor || "—", [g.numero_factura || "—", tr(g)].filter(Boolean).join("\n"),
             g.descripcion || "", g.devuelto_motivo || "—", money(g.monto)]),
           anchos: { 0: { cellWidth: 52 }, 1: { cellWidth: 170 }, 2: { cellWidth: 84 }, 5: { cellWidth: 52, halign: "right" } },
         });

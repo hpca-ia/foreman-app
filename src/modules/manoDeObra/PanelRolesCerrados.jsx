@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Printer, ChevronDown, ChevronRight, Check, X, Upload, Undo2 } from "lucide-react";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
@@ -7,6 +7,8 @@ import { FORMAS_PAGO } from "../controlObra/pagos";
 import { reabrirRol, pagarLineas, imprimirRecibos } from "./rolGuardado";
 import { SOPORTES, periodoTexto, porPagar, resumenDePago } from "./rolPagado";
 import { hoyEnObra } from "./permisoDeDias";
+import Traza from "../../components/Traza";
+import { trazasPorFactura } from "../../lib/origenes";
 
 // Los roles cerrados: el recibo de cada uno, y quién ya cobró.
 //
@@ -24,6 +26,15 @@ export default function PanelRolesCerrados({ roles, lead, editable, quien, onCam
   const [pago, setPago] = useState(null);
   const [trabajando, setTrabajando] = useState(false);
   const [error, setError] = useState("");
+  // Cada pago entró al control como un gasto: su TR y la planilla donde quedó.
+  const [trazas, setTrazas] = useState({});
+  const pagados = roles.flatMap(r => (r.lineas || []).map(l => l.obra_factura_id).filter(Boolean)).sort().join(",");
+  useEffect(() => {
+    if (!pagados) { setTrazas({}); return undefined; }
+    let vivo = true;
+    trazasPorFactura(pagados.split(",")).then(t => { if (vivo) setTrazas(t); }, () => {});
+    return () => { vivo = false; };
+  }, [pagados]);
 
   if (!roles.length) {
     return (
@@ -139,6 +150,7 @@ export default function PanelRolesCerrados({ roles, lead, editable, quien, onCam
                             ? `Pagado el ${fechaCorta(l.pago_fecha)} · ${l.pago_forma || ""}${l.pago_referencia ? ` ${l.pago_referencia}` : ""} · ${SOPORTES[l.soporte]?.label || ""}`
                             : Number(l.a_pagar) > 0 ? `${l.cargo || "—"} · ${l.dias} días` : "Nada que cobrar en este rol"}
                         </div>
+                        {l.obra_factura_id && trazas[l.obra_factura_id] && <Traza t={trazas[l.obra_factura_id]} />}
                       </div>
                       <span style={{ textAlign: "right", fontWeight: 700, color: colors.ink }}>${fmt(l.a_pagar)}</span>
                       <button onClick={() => imprimir(rol, [l])} title="Recibo de esta persona"

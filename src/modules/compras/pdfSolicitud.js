@@ -160,7 +160,7 @@ export async function pdfSolicitud({ solicitud, obra, pidio, historial = [], adj
   });
 
   pieDePdf(doc, {
-    elemento: `Solicitud de compra N° ${solicitud.id}`,
+    elemento: `Solicitud de compra N° ${solicitud.id}${solicitud.tr ? ` · ${solicitud.lead_id ? `PR${solicitud.lead_id}-` : ""}TR${solicitud.tr}` : ""}`,
     proyecto: obra, margen: M, abajo: 9,
   });
 

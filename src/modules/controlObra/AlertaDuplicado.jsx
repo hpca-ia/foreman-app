@@ -1,5 +1,6 @@
 import { AlertTriangle, AlertOctagon } from "lucide-react";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
 import { fmt } from "./calculos";
 import { inputStyle } from "../../components/ui/Input";
 
@@ -40,6 +41,7 @@ export default function AlertaDuplicado({ exactos = [], posibles = [], justifica
             {f.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{f.numero_factura}</span>}
             <span style={{ float: "right", fontWeight: 700 }}>${fmt(f.total)}</span>
           </div>
+          {f._traza && <div><Traza t={f._traza} /></div>}
           <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>
             {f.fecha} · {ORIGEN[f.origen] || f.origen}
             {f.subido_por_nombre ? ` por ${f.subido_por_nombre}` : ""}

@@ -37,6 +37,9 @@ export default async function handler(req, res) {
     json(await rest("usuarios?activo=eq.true&select=id,nombre,email,rol")),
   ]);
   const obra = obras?.[0]?.nombre || "la obra";
+  // SU CÓDIGO (migración 202), para que el correo diga de cuál se habla:
+  // «PR15-TR52». Viene en el `select=*`; sin la 202 no hay y no se escribe.
+  const codigo = f.tr ? `${obras?.[0]?.lead_id ? `PR${obras[0].lead_id}-` : ""}TR${f.tr}` : "";
   const para = [];
   for (const u of usuarios || []) {
     const correo = String(u.email || "").trim().toLowerCase();
@@ -51,7 +54,7 @@ export default async function handler(req, res) {
   const hallazgos = (f.sri_hallazgos || []).filter(h => h.nivel === "grave");
   const cuerpo = `
     <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
-      <strong>${esc(f.razon_social || "Sin proveedor")}</strong>${f.numero_factura ? ` · factura ${esc(f.numero_factura)}` : ""}<br>
+      <strong>${esc(f.razon_social || "Sin proveedor")}</strong>${f.numero_factura ? ` · factura ${esc(f.numero_factura)}` : ""}${codigo ? ` · <strong>${codigo}</strong>` : ""}<br>
       <span style="color:#555">${esc(obra)} · ${esc(f.fecha || "")} · $${plata(f.total)}</span>
     </p>
     ${hallazgos.map(h => `
@@ -66,7 +69,7 @@ export default async function handler(req, res) {
 
   const r = await enviarCorreo({
     to: para,
-    subject: `Factura que el SRI no acepta · ${f.razon_social || "proveedor"} · ${obra}`,
+    subject: `Factura que el SRI no acepta · ${codigo ? `${codigo} · ` : ""}${f.razon_social || "proveedor"} · ${obra}`,
     html: plantilla({
       titulo: "Esta factura no sustenta el gasto",
       subtitulo: obra,

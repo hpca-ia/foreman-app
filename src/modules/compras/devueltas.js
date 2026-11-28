@@ -29,8 +29,13 @@ const texto = v => String(v ?? "").trim();
 /** El número con que se nombra una compra: el de la base, que no cambia y ya salía en el PDF. */
 export const numeroDeCompra = s => (s?.id != null ? `N° ${s.id}` : "");
 
-/** El título de la tarea de un paso, con el número adelante: «Aprobar compra N° 37: Pintura…». */
-export const tituloDelPaso = (paso, s) => `${paso}${s?.id != null ? ` N° ${s.id}` : ""}: ${texto(s?.descripcion)}`;
+/**
+ * El título de la tarea de un paso, con el número adelante: «Aprobar compra
+ * N° 37: Pintura…». Y con su TR cuando ya la tiene (migración 202): «Aprobar
+ * compra N° 37 · TR52: Pintura…», el mismo código que va a llevar su factura.
+ */
+export const tituloDelPaso = (paso, s) =>
+  `${paso}${s?.id != null ? ` N° ${s.id}` : ""}${Number(s?.tr) > 0 ? ` · TR${Number(s.tr)}` : ""}: ${texto(s?.descripcion)}`;
 
 /** ¿Lo que se escribió en el buscador es el número de una compra? «37», «#37», «N° 37», «n 37». */
 export function numeroBuscado(busca) {

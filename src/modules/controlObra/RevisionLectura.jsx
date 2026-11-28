@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
+import { trazaEnTexto } from "../../lib/trazabilidad";
 import Button from "../../components/ui/Button";
 import { fmt } from "./calculos";
 import { CLASES_DOC } from "./pagos";
@@ -104,6 +106,7 @@ export default function RevisionLectura({ facturas = [], onLeido, onAbrir }) {
                 {f.razon_social || "Sin proveedor"}
                 {f.numero_factura ? <span style={{ color: colors.muted }}> · {f.numero_factura}</span> : ""}
                 <span style={{ color: colors.muted }}> · {CLASES_DOC[f.clase || "factura"]?.label || f.clase}</span>
+                {f._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
               </span>
               <span style={{ width: 80, color: colors.muted }}>{f.origen === "caja_chica" ? "caja chica" : "planilla"}</span>
               <span style={{ width: 80, textAlign: "right" }}>${fmt(Number(f.total))}</span>
@@ -128,7 +131,7 @@ export default function RevisionLectura({ facturas = [], onLeido, onAbrir }) {
           <strong>{fallas.length} no se pudieron leer esta vez</strong> y quedan para la próxima:
           <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
             {fallas.slice(0, 8).map(({ factura, error }) => (
-              <li key={factura.id}>{factura.razon_social || "Sin proveedor"} {factura.numero_factura || ""} — {error}</li>
+              <li key={factura.id}>{factura._traza?.tr ? `${trazaEnTexto(factura._traza)} · ` : ""}{factura.razon_social || "Sin proveedor"} {factura.numero_factura || ""} — {error}</li>
             ))}
           </ul>
         </div>

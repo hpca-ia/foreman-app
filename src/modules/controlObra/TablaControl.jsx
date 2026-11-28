@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
+import { codigoODC } from "../../lib/trazabilidad";
 import { fmt, gastosDe, gastosSueltos, quizaYaSeCompro } from "./calculos";
 import { notaDeLaOrden } from "./presupuestoParaGastar.js";
 import { netoPorRubro } from "./cuentaBeneficios.js";
@@ -559,7 +561,10 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                       fontSize: 11, padding: "5px 0", borderBottom: `1px solid ${colors.neutralSoft}`,
                       alignItems: "center" }}>
                       <span style={{ color: colors.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        title={d.descripcion}>{d.descripcion || `#${d.id}`}</span>
+                        title={d.descripcion}>
+                        {/* La orden de compra, con su código: es por el que se la busca en Compras. */}
+                        <strong style={{ color: colors.brand, fontWeight: 600 }}>{codigoODC(d.id)}</strong> {d.descripcion || ""}
+                      </span>
                       <span style={{ color: colors.muted }}>{ETIQUETA[d.estado] || d.estado}</span>
                       <span style={{ textAlign: "right", color: colors.ink, fontWeight: 600 }}
                         title={`Monto: ${d.deDonde}`}>
@@ -581,6 +586,7 @@ export default function TablaControl({ grupos, porRubro, totales, modo = "capitu
                           {yaFacturado[d.id].razon_social || "sin proveedor"}
                           {yaFacturado[d.id].detalle ? ` · ${String(yaFacturado[d.id].detalle).slice(0, 50)}` : ""}:
                           {" "}si es esta compra, el control la está contando dos veces.
+                          {yaFacturado[d.id]._traza && <Traza t={yaFacturado[d.id]._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                         </span>
                       )}
                     </div>

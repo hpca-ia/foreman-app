@@ -11,6 +11,7 @@
 // El caso "posible" existe porque a veces no se captura el N° de factura.
 
 import { supabase } from "../../lib/supabase";
+import { conTrazaDeLaObra } from "../../lib/origenes";
 
 const DIAS_CERCANOS = 5;
 const norm = s => (s || "").toString().trim().toUpperCase().replace(/[\s.-]/g, "");
@@ -61,5 +62,11 @@ export async function buscarDuplicados({ obraId, ruc, numeroFactura, razonSocial
     if (mismoProveedor && mismoMonto && fechaCerca) posibles.push({ ...f, motivo: "proveedor-monto-fecha" });
   }
 
+  // CON SU TRAZA, para que el aviso diga contra cuál choca: «PR15-TR52 · ODC6
+  // · PL1». Si no se puede armar, salen como estaban.
+  if (exactos.length || posibles.length) {
+    const con = await conTrazaDeLaObra([...exactos, ...posibles], obraId).catch(() => null);
+    if (con) return { exactos: con.slice(0, exactos.length), posibles: con.slice(exactos.length) };
+  }
   return { exactos, posibles };
 }

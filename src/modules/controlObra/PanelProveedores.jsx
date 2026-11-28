@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, Trash2, FileText, AlertTriangle } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
 import Button from "../../components/ui/Button";
 import { inputStyle } from "../../components/ui/Input";
 import { abrirArchivo } from "../../lib/archivos";
@@ -175,6 +176,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
             <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.ink, padding: "2px 0" }}>
               <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                 {f.razon_social || "Sin proveedor"} · {f.detalle || f.numero_factura || "—"} · {dia(f.fecha)}
+                {f._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
               </span>
               <span style={{ fontWeight: 600 }}>${fmt(f.total)}</span>
               {puedeRegistrar && (
@@ -199,6 +201,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
             <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: colors.ink, padding: "2px 0" }}>
               <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
                 {f.razon_social || "Sin proveedor"} · {f.detalle || f.numero_factura || "—"} · {dia(f.fecha)}
+                {f._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
               </span>
               <span style={{ fontWeight: 600 }}>${fmt(f.total)}</span>
               {puedeRegistrar && (
@@ -260,6 +263,7 @@ export default function PanelProveedores({ obra, facturas = [], currentUser, pue
                         </span>
                         <span style={{ flex: 1, minWidth: 120, fontSize: 12.5, color: colors.ink, overflowWrap: "anywhere" }}>
                           {d.numero_factura || d.detalle || "Sin número"} · {dia(d.fecha)}
+                          {d._traza && <Traza t={d._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                         </span>
                         {d.archivo_url && (
                           <button onClick={() => abrirArchivo(d.archivo_url, { nombre: d.archivo_nombre })} title={d.archivo_nombre || "Ver el respaldo"}

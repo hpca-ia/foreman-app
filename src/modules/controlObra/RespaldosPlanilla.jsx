@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { FileText, Download, AlertTriangle } from "lucide-react";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
 import { enlacesArchivos } from "../../lib/archivos";
 import { fmt } from "./calculos";
 
@@ -66,6 +67,7 @@ export default function RespaldosPlanilla({ facturas = [], titulo = "Respaldos" 
           {sinArchivo.map(f => (
             <div key={f.id} style={{ fontSize: 12, color: colors.ink, padding: "1px 0", overflowWrap: "anywhere" }}>
               {f.numero_factura || "sin número"} · {f.razon_social || "sin proveedor"} · ${fmt(f.total)}
+              {f._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
             </div>
           ))}
         </div>
@@ -97,6 +99,7 @@ export default function RespaldosPlanilla({ facturas = [], titulo = "Respaldos" 
                     {f.razon_social || "sin proveedor"} · {dia(f.fecha)}
                   </div>
                   <div style={{ fontSize: 11, fontWeight: 700, color: colors.ink, marginTop: 1 }}>${fmt(f.total)}</div>
+                  {f._traza && <Traza t={f._traza} estilo={{ fontSize: 9.5 }} />}
                 </div>
               </a>
             );

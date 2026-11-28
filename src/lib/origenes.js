@@ -38,8 +38,9 @@ export async function trUnidas() {
  * @param facturas   filas de obra_facturas
  * @param obra       { lead_id }
  * @param planillas  las de la obra
+ * @param leadPorObra  { obraId: leadId }, cuando las facturas son de varias obras
  */
-export async function conTraza(facturas = [], obra = null, planillas = []) {
+export async function conTraza(facturas = [], obra = null, planillas = [], leadPorObra = null) {
   if (!facturas.length) return facturas;
   const gastoIds = unicos(facturas.map(f => f.caja_gasto_id));
   const [compras, gastos] = await Promise.all([
@@ -56,7 +57,7 @@ export async function conTraza(facturas = [], obra = null, planillas = []) {
     const caja = c ? { id: c.id, nombre: c.responsable_nombre } : null;
     const odc = odcDe[f.id] || [];
     return { ...f, _traza: traza({
-      tr: f.tr, leadId: obra?.lead_id, odc, caja,
+      tr: f.tr, leadId: leadPorObra ? leadPorObra[f.obra_id] : obra?.lead_id, odc, caja,
       planilla: f.planilla_id ? plDe[f.planilla_id] : null,
       puerta: puertaDe(f, { odc, caja }),
     }) };
@@ -125,5 +126,44 @@ export async function trazasDeCompras(solicitudes = []) {
       facturaPerdida: !facturas.fallo && !!s.factura_id && !f,
     };
   });
+  return out;
+}
+
+/**
+ * Lo mismo para unas pocas facturas sueltas de una obra, cuando la pantalla no
+ * tiene a mano ni la obra ni sus planillas ni la TR (el aviso de repetida).
+ */
+export async function conTrazaDeLaObra(facturas = [], obraId = null) {
+  if (!facturas.length || !obraId) return facturas;
+  const [{ data: obra }, { data: planillas }, conTr] = await Promise.all([
+    supabase.from("obras").select("id,lead_id").eq("id", obraId).maybeSingle(),
+    supabase.from("planillas").select("id,numero,nombre,estado").eq("obra_id", obraId),
+    // Aparte y tolerante: sin la 202 la columna no existe y esto vuelve vacío.
+    deATandas("obra_facturas", "id,tr", "id", unicos(facturas.map(f => f.id))),
+  ]);
+  const trDe = {}; conTr.forEach(f => { trDe[f.id] = f.tr; });
+  return conTraza(facturas.map(f => ({ ...f, tr: f.tr ?? trDe[f.id] ?? null })), obra, planillas || []);
+}
+
+/**
+ * La traza de unas facturas del control de las que solo se sabe el id (el pago
+ * de un rol, un correo): { facturaId: traza }.
+ */
+export async function trazasPorFactura(facturaIds = []) {
+  const ids = unicos(facturaIds);
+  if (!ids.length) return {};
+  const [fs, conTr] = await Promise.all([
+    deATandas("obra_facturas", "id,obra_id,planilla_id,origen,caja_gasto_id", "id", ids),
+    deATandas("obra_facturas", "id,tr", "id", ids),
+  ]);
+  const [obras, planillas] = await Promise.all([
+    deATandas("obras", "id,lead_id", "id", unicos(fs.map(f => f.obra_id))),
+    deATandas("planillas", "id,numero,nombre,estado", "id", unicos(fs.map(f => f.planilla_id))),
+  ]);
+  const trDe = {}; conTr.forEach(f => { trDe[f.id] = f.tr; });
+  const leadPorObra = {}; obras.forEach(o => { leadPorObra[o.id] = o.lead_id; });
+  const con = await conTraza(fs.map(f => ({ ...f, tr: trDe[f.id] ?? null })), null, planillas, leadPorObra);
+  const out = {};
+  con.forEach(f => { out[f.id] = f._traza; });
   return out;
 }

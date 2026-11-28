@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, HardHat } from "lucide-react";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
 import { inputStyle } from "../../components/ui/Input";
 import RevisionLectura from "./RevisionLectura";
 import { fmt } from "./calculos";
@@ -176,7 +177,8 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
                       <div key={r.id} style={{ display: "flex", fontSize: 11, color: colors.muted, paddingLeft: 12 }}>
                         <span style={{ flex: 1 }}>
                           {dia(f?.fecha)} · {f?.razon_social || "Sin proveedor"} {f?.numero_factura ? `· ${f.numero_factura}` : ""}
-                          {f?.origen === "caja_chica" ? " · caja chica" : ""}
+                          {f?.origen === "caja_chica" && !f?._traza ? " · caja chica" : ""}
+                          {f?._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                         </span>
                         <span style={{ width: 120, textAlign: "right" }}>{num(Number(r.cantidad))} {r.unidad}</span>
                         <span style={{ width: 90 }} />
