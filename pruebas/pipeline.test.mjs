@@ -53,7 +53,7 @@ test("las etapas dependen del tipo, y el lead está en una sola", () => {
   assert.deepEqual(etapasDelTipo(catalogo, "diseno").map(e => e.nombre),
     ["Contacto", "Levantamiento", "Plan masa", "Anteproyecto", "Propuesta de honorarios", "Negociación"]);
   assert.deepEqual(etapasDelTipo(catalogo, "construccion").map(e => e.nombre),
-    ["Contacto", "Levantamiento", "Ingenierías", "Presupuesto", "Propuesta enviada", "Negociación"]);
+    ["Contacto", "Levantamiento", "Plan masa", "Anteproyecto", "Ingenierías", "Presupuesto", "Propuesta enviada", "Negociación"]);
   assert.equal(etapasDelTipo(catalogo, "diseno_construccion").length, 8);
   // Las de ejecutar —obra gris— están apagadas: no se ofrecen.
   assert.equal(etapasDelTipo(catalogo, "construccion").some(e => e.id === "con_gris"), false);
@@ -67,7 +67,9 @@ test("las etapas dependen del tipo, y el lead está en una sola", () => {
 
 test("al cambiar el tipo cae en la etapa que se llama igual, o en la primera", () => {
   assert.equal(etapaAlCambiarDeTipo(lead(), "construccion", catalogo), "con_presupuesto");
-  assert.equal(etapaAlCambiarDeTipo(lead({ etapa: "dyc_plan_masa" }), "construccion", catalogo), "con_contacto");
+  // Desde la 199 Construcción también tiene Plan masa.
+  assert.equal(etapaAlCambiarDeTipo(lead({ etapa: "dyc_plan_masa" }), "construccion", catalogo), "con_plan_masa");
+  assert.equal(etapaAlCambiarDeTipo(lead({ tunel: "diseno", etapa: "dis_propuesta" }), "construccion", catalogo), "con_contacto");
   const c = alCambiarTipo(lead(), "construccion", catalogo);
   assert.deepEqual(c.campos, { tunel: "construccion", etapa: "con_presupuesto" });
   assert.equal(c.detalle, "Pasa de Diseño y construcción a Construcción, en Presupuesto.");

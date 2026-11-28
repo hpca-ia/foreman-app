@@ -471,3 +471,9 @@ mostraron cuatro maquetas y eligió «la 1»:
 Quedó afuera, a la espera de lo que él diga: sumarle Plan masa y Anteproyecto
 a Construcción («hay proyectos en construcción que pueden estar con tareas en
 presupuesto y tareas en diseño»).
+
+**28/11/2026:** dijo que sí. Migración 199: Construcción queda Contacto ·
+Levantamiento · Plan masa · Anteproyecto · Ingenierías · Presupuesto ·
+Propuesta enviada · Negociación, el mismo orden que Diseño y construcción.
+Nadie cambia de etapa ni ninguna tarea; aparecen dos columnas y dos lugares
+del camino más.

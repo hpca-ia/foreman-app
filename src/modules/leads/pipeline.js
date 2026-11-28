@@ -49,8 +49,8 @@ export const sePersigue = lead => !!lead && !lead.resultado;
 export const esProyecto = lead => estaAprobado(lead) || !!lead?.obra_id || lead?.es_lead === false;
 
 // El catálogo de etapas vive en la base (`pipeline_etapas`), porque cambia con
-// el tiempo y se edita en Ajustes → Etapas. Esto es lo mismo que siembra la
-// migración 171: sirve mientras carga, y si el catálogo no se pudo leer.
+// el tiempo y se edita en Ajustes → Etapas. Esto es lo mismo que siembran las
+// migraciones 171 y 199: sirve mientras carga, y si el catálogo no se pudo leer.
 //
 // Son las etapas de PERSEGUIR un trabajo, por tipo de lead. Las de ejecutarlo
 // —obra gris, acabados, entrega— no van acá: eso es Control.
@@ -64,10 +64,13 @@ export const CATALOGO_BASE = [
   deFabrica("diseno", "dis", 60, "negociacion", "Negociación"),
   deFabrica("construccion", "con", 10, "contacto", "Contacto"),
   deFabrica("construccion", "con", 20, "levantamiento", "Levantamiento"),
-  deFabrica("construccion", "con", 30, "ingenierias", "Ingenierías"),
-  deFabrica("construccion", "con", 40, "presupuesto", "Presupuesto"),
-  deFabrica("construccion", "con", 50, "propuesta", "Propuesta enviada"),
-  deFabrica("construccion", "con", 60, "negociacion", "Negociación"),
+  // Plan masa y Anteproyecto también en Construcción: Hernán, 28/11/2026 (199).
+  deFabrica("construccion", "con", 30, "plan_masa", "Plan masa"),
+  deFabrica("construccion", "con", 40, "anteproyecto", "Anteproyecto"),
+  deFabrica("construccion", "con", 50, "ingenierias", "Ingenierías"),
+  deFabrica("construccion", "con", 60, "presupuesto", "Presupuesto"),
+  deFabrica("construccion", "con", 70, "propuesta", "Propuesta enviada"),
+  deFabrica("construccion", "con", 80, "negociacion", "Negociación"),
   deFabrica("diseno_construccion", "dyc", 10, "contacto", "Contacto"),
   deFabrica("diseno_construccion", "dyc", 20, "levantamiento", "Levantamiento"),
   deFabrica("diseno_construccion", "dyc", 30, "plan_masa", "Plan masa"),
