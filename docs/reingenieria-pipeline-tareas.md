@@ -442,3 +442,32 @@ Cómo queda. **Una sola idea para el proyecto y para cada actividad: en curso
 
 Sin migración: usa `tasks.espera`, `tarea_comentarios` y las columnas de
 espera de `leads`, que ya estaban.
+
+## 27/11/2026 · El pipeline como tablero
+
+Hernán: «Para mi criterio el pipeline sigue igual... debe ser más interactivo,
+más visual». Con el flujo en curso / en espera ya publicado (1c2de93), la cara
+seguía siendo una lista de renglones con un desplegable por proyecto. Se le
+mostraron cuatro maquetas y eligió «la 1»:
+
+- **El pipeline es un tablero.** Una franja por tipo; en cada una, sus etapas
+  como columnas; cada proyecto, una tarjeta en la columna de su etapa, con su
+  estado (en curso, en espera, toca revisar, atrasado), qué dice, cuánto va su
+  checklist y dónde más tiene algo abierto («También en curso en Ingenierías ·
+  3»). Se mantiene apretada y se arrastra a otra etapa (con «Deshacer»);
+  soltarla en «Aprobado» o «Perdido» pide confirmar. Arriba, cuatro
+  contadores que filtran.
+- **La ficha es ancha.** Las etapas como un camino: «Está acá» la del
+  proyecto y «En curso» toda etapa con algo abierto; tocar una deja ver solo
+  lo suyo, agregar ahí o mover el proyecto. Las actividades en **En curso ·
+  En espera · Hechas**: se sueltan en otra columna (queda en espera, se
+  termina, se retoma) o sobre una etapa del camino (para adelante o para
+  atrás). Cada tarjeta es la misma fila de siempre, con su ✓; tocada, se abre
+  a lo ancho.
+- El arrastre del navegador no andaba con el dedo en el iPad: ahora se
+  mantiene apretado (`lib/arrastrarConElDedo.js`). Las reglas, sin pantalla,
+  en `modules/leads/tablero.js`.
+
+Quedó afuera, a la espera de lo que él diga: sumarle Plan masa y Anteproyecto
+a Construcción («hay proyectos en construcción que pueden estar con tareas en
+presupuesto y tareas en diseño»).

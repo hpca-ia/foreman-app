@@ -112,11 +112,22 @@ test("el checklist dibuja el avance por etapa y deja agregar un punto parado en 
   assert.match(lista, /setNuevo\(\{ \.\.\.EN_BLANCO, etapa: e\.id \}\)/);
 });
 
-test("un punto se pasa de etapa arrastrándolo hasta ella; abierto no se agarra, que adentro se selecciona texto", () => {
+test("un punto se pasa de etapa soltándolo sobre ella, y de estado soltándolo en otra columna; con el dedo, manteniéndolo apretado", () => {
+  // Hernán, 27/11/2026, eligió el tablero: el arrastre del navegador no andaba
+  // con el dedo en el iPad. Ahora es el de lib/arrastrarConElDedo.js.
   const lista = codigoDe("../src/modules/leads/ListaDeTareas.jsx");
-  assert.match(lista, /draggable=\{!!onAgarrar && !abierta\}/);
-  assert.match(lista, /if \(\(punto\.etapa_id \|\| null\) !== e\.id\) cambiarEtapa\(punto, e\.id\);/);
-  // Solo sobre las etapas del tipo del proyecto, y solo quien puede editar.
+  assert.match(lista, /useArrastre\(\{ alSoltar: \(item, lugar\) => soltarActividad\(item, lugar\) \}\)/);
+  // Cada tarjeta se agarra entera; la fila de adentro ya no usa el arrastre viejo.
+  assert.match(lista, /const props = editable \? agarrar\(item\) : \{\};/);
+  assert.match(lista, /onAgarrar=\{null\} enTarjeta=\{enColumna\}/);
+  // Adónde se suelta: las tres columnas y las etapas del tipo del proyecto, y solo quien puede editar.
+  assert.match(lista, /data-soltar=\{editable \? lugar : undefined\}/);
   assert.match(lista, /const sePuede = editable && !!e\.id && etapas\.some\(x => x\.id === e\.id\);/);
-  assert.match(lista, /onAgarrar=\{editable && etapas\.length > 0 \? agarrado =>/);
+  assert.match(lista, /data-soltar=\{sePuede \? lugar : undefined\}/);
+  // Lo que pasa al soltar sale de tablero.js, con las funciones de siempre, y se puede deshacer.
+  assert.match(lista, /const pasos = alSoltarActividad\(item, lugar\);/);
+  assert.match(lista, /await moverDeEtapa\(item, p\.etapa, /);
+  assert.match(lista, /await marcarItem\(item, p\.marcar, /);
+  assert.match(lista, /await marcarEspera\(item, p\.espera, currentUser\)/);
+  assert.match(lista, /soltarActividad\(despuesDeSoltar\(item, pasos\), volver, \{ deshaciendo: true \}\)/);
 });

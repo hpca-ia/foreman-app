@@ -12,7 +12,8 @@ import { ORIGENES, TEMPERATURAS, CATALOGO_BASE } from "./constantes";
 import GenteDelProyecto from "./GenteDelProyecto";
 import ListaDeTareas from "./ListaDeTareas";
 import EstadoDelLead from "./EstadoDelLead";
-import { TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, sePersigue, estaAprobado } from "./pipeline";
+import { TIPOS, ORDEN_DE_TIPOS, tipoDe, etapasDelTipo, sePersigue, estaAprobado, alCambiarEtapa } from "./pipeline";
+import { aplicar } from "./proyecto";
 import { useDictado } from "../../lib/dictado";
 import ArchivosDelProyecto from "./ArchivosDelProyecto";
 import AprobacionesDelProyecto from "./AprobacionesDelProyecto";
@@ -217,7 +218,8 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
     : [["datos", "Datos"]];
 
   return (
-    <Modal onClose={onCerrar} maxWidth={560}>
+    // Ancha: adentro van las etapas en fila y las actividades en tres columnas.
+    <Modal onClose={onCerrar} maxWidth={editando ? 1040 : 560}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
           {editando ? lead.nombre : "Nuevo lead"}
@@ -339,7 +341,14 @@ export default function ModalLead({ lead, currentUser, users = [], todos = [], c
           </div>
 
           <ListaDeTareas key={vuelta} lead={vivo} etapaId={sePersigue(vivo) ? vivo.etapa : null} catalogo={catalogo} users={users}
-            currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} onTareas={setTareasDelLead} />
+            currentUser={currentUser} puede={puede} editable={editable} onBitacora={recargarBitacora} onTareas={setTareasDelLead}
+            // «Mover el proyecto acá», desde el camino de etapas: lo mismo que el desplegable de arriba.
+            onMoverProyecto={async etapa => {
+              const r = await aplicar(vivo, alCambiarEtapa(vivo, etapa, catalogo), currentUser);
+              if (r.error) return r.error;
+              setVivo(r.lead); recargarBitacora();
+              return null;
+            }} />
 
           {/* Los presupuestos de este proyecto: que existen y en qué estado
               están. Sin montos, que el pipeline no habla de plata —eso se

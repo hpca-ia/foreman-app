@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, AlertTriangle, Hourglass, ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
 import Button from "../../components/ui/Button";
 import { CATALOGO_BASE } from "./constantes";
-import {
-  TIPOS, tipoDe, sePersigue, estaAprobado, estaPerdido, porTipo, avisosDelPipeline, hoyISO,
-} from "./pipeline";
-import { avanceDe } from "./tareasDelProyecto";
-import EstadoDelLead from "./EstadoDelLead";
+import { TIPOS, tipoDe, sePersigue, estaAprobado, estaPerdido, hoyISO } from "./pipeline";
+import { ESTADOS_DE_TARJETA, cuentasDelTablero } from "./tablero";
+import TableroDelPipeline from "./TableroDelPipeline";
 import ModalLead from "./ModalLead";
 import NovaLeads from "./NovaLeads";
 import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
@@ -16,9 +14,10 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 // EL PIPELINE ES LO QUE SE PERSIGUE.
 //
 // Se lee por TIPO de lead —Diseño, Construcción, Diseño y construcción—, que
-// es lo que decide por qué etapas pasa cada uno. Cada lead está en una sola
-// etapa, que se elige de un desplegable en su misma tarjeta, y dice su estado:
-// en curso —con lo próximo que tiene fecha— o en espera, y desde cuándo.
+// es lo que decide por qué etapas pasa cada uno. Desde el 27/11/2026 es un
+// TABLERO: cada proyecto es una tarjeta en la columna de su etapa, que se
+// arrastra a otra (TableroDelPipeline, tablero.js). Arriba, cuántos hay en
+// curso, en espera, para revisar y atrasados; tocar uno apaga los demás.
 //
 // Lo aprobado ya no está acá: vive en Control y se lista en «En marcha».
 //
@@ -26,7 +25,8 @@ import { asegurarProyecto, obrasSueltas } from "../../lib/proyectoDeObra";
 // acá» que se podía marcar en tres a la vez; la lista mostraba una y adentro
 // decía otra. Las reglas de ahora están en pipeline.js.
 
-const COLUMNAS_TAREA = "id,lead_id,title,due_date,hora,status,type,compra_id,ruta_orden,assignee_id,espera,descartada";
+// La etapa de cada tarea: la tarjeta dice dónde más tiene algo abierto.
+const COLUMNAS_TAREA = "id,lead_id,title,due_date,hora,status,type,compra_id,ruta_orden,assignee_id,espera,descartada,etapa_id";
 
 export default function ModuloLeads({ currentUser, users = [], puede = () => true, nivelProyecto = () => null, onIrAObra, onIrEnMarcha }) {
   const [leads, setLeads] = useState([]);
@@ -38,9 +38,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const [nuevo, setNuevo] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [verPerdidos, setVerPerdidos] = useState(false);
-  // Tocar un aviso o una etapa deja ver solo eso.
-  const [soloAviso, setSoloAviso] = useState(null);
-  const [soloEtapa, setSoloEtapa] = useState(null);
+  // Tocar uno de los contadores de arriba apaga las demás tarjetas.
+  const [filtro, setFiltro] = useState(null);
   // Obras que entraron directo por Control de Obra y todavía no tienen proyecto.
   const [sueltas, setSueltas] = useState([]);
   const [trayendo, setTrayendo] = useState(false);
@@ -85,19 +84,10 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
   const perdidos = mios.filter(estaPerdido);
   const tareasDe = id => tareas.filter(t => String(t.lead_id) === String(id));
 
-  // Los dos avisos, y nada más: llegó el día que se pidió para revisar uno
-  // que está en espera, o venció algo que tenía fecha. Es la misma lista que
-  // arma el panel del dashboard y el correo de la mañana.
-  const avisos = avisosDelPipeline({ leads: perseguidos, tareas, hoy });
-  const claseDeAviso = Object.fromEntries(avisos.map(a => [String(a.lead_id), a.clase]));
-  const cuantos = clase => avisos.filter(a => a.clase === clase).length;
-
-  const visibles = perseguidos.filter(l =>
-    (!soloAviso || claseDeAviso[String(l.id)] === soloAviso) && (!soloEtapa || l.etapa === soloEtapa));
-  const grupos = porTipo(visibles, catalogo);
-  // Las cuentas por etapa salen de todos, no de lo filtrado: si no, al tocar
-  // una etapa las demás quedarían en cero y no se podría cambiar de una a otra.
-  const cuentas = Object.fromEntries(porTipo(perseguidos, catalogo).map(g => [g.tipo, g.etapas]));
+  // Cuántos en curso, en espera, para revisar y atrasados. «Toca revisar» y
+  // «atrasado» son los dos avisos del pipeline: la misma cuenta que el panel
+  // del dashboard y el correo de la mañana.
+  const cuentas = cuentasDelTablero(perseguidos, tareasDe, hoy);
 
   const alCambiar = l => setLeads(ls => ls.map(x => (x.id === l.id ? { ...x, ...l } : x)));
 
@@ -117,29 +107,27 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
 
       {puede("leads.ver") && <NovaLeads leads={perseguidos} currentUser={currentUser} catalogo={catalogo} onCambio={cargar} />}
 
-      {/* Lo que pide que alguien haga algo va primero. Tocar un aviso deja ver
-          solo esos leads. */}
-      {avisos.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-          {[
-            ["insistir", "en espera: toca revisar", Hourglass, colors.danger, colors.dangerSoft, colors.dangerBorder],
-            ["vencido", "con algo vencido", AlertTriangle, colors.danger, colors.dangerSoft, colors.dangerBorder],
-          ].filter(([clase]) => cuantos(clase) > 0).map(([clase, txt, Icono, color, bg, borde]) => (
-            <button key={clase} onClick={() => setSoloAviso(a => (a === clase ? null : clase))}
-              style={{ display: "flex", alignItems: "center", gap: 8, background: bg, border: `1.5px solid ${soloAviso === clase ? color : borde}`,
-                borderRadius: colors.radiusMd, padding: "9px 13px", cursor: "pointer", fontFamily: colors.font }}>
-              <Icono size={15} color={color} />
-              <span style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1 }}>{cuantos(clase)}</span>
-              <span style={{ fontSize: 12, color, fontWeight: 600 }}>{txt}</span>
-            </button>
-          ))}
-          {(soloAviso || soloEtapa) && (
-            <button onClick={() => { setSoloAviso(null); setSoloEtapa(null); }}
-              style={{ border: `1px solid ${colors.border}`, background: "#fff", borderRadius: colors.radiusMd, padding: "9px 13px", cursor: "pointer",
-                fontFamily: colors.font, fontSize: 12, color: colors.inkSoft }}>
-              Ver todos
+      {/* CUÁNTOS EN CADA ESTADO. Tocar uno deja a la vista solo esos. */}
+      {perseguidos.length > 0 && (
+        <div className="contadores-del-pipeline" style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+          {[["curso", "en curso"], ["espera", "en espera"], ["revisar", "toca revisar"], ["atrasado", cuentas.atrasado === 1 ? "atrasado" : "atrasados"]].map(([k, txt]) => {
+            const E = ESTADOS_DE_TARJETA[k];
+            return (
+              <button key={k} className="contador-del-pipeline" data-estado={k} onClick={() => setFiltro(f => (f === k ? null : k))}
+                style={{ display: "flex", alignItems: "center", gap: 7, background: "#fff", border: `1.5px solid ${filtro === k ? colors.ink : colors.border}`,
+                  borderRadius: 12, padding: "7px 12px 7px 9px", cursor: "pointer", fontFamily: colors.font, boxShadow: filtro === k ? "0 0 0 3px rgba(17,24,39,.06)" : "none" }}>
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: E.color }} />
+                <span style={{ fontSize: 17, fontWeight: 800, color: colors.ink, lineHeight: 1 }}>{cuentas[k]}</span>
+                <span style={{ fontSize: 12.5, color: colors.inkSoft, fontWeight: 600 }}>{txt}</span>
+              </button>
+            );
+          })}
+          {filtro && (
+            <button onClick={() => setFiltro(null)} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", fontFamily: colors.font, fontSize: 12, textDecoration: "underline" }}>
+              ver todos
             </button>
           )}
+          {puedeEditar && <span style={{ fontSize: 11.5, color: colors.muted, marginLeft: 4 }}>Mantené apretada una tarjeta y arrastrala a otra etapa · tocala para abrirla.</span>}
         </div>
       )}
 
@@ -169,71 +157,8 @@ export default function ModuloLeads({ currentUser, users = [], puede = () => tru
                 Hoy no se está persiguiendo nada.
               </div>
             )}
-            {perseguidos.length > 0 && !visibles.length && (
-              <div style={{ color: colors.muted, fontSize: 13, padding: "10px 0 16px" }}>
-                Ningún lead con ese filtro.{" "}
-                <button onClick={() => { setSoloAviso(null); setSoloEtapa(null); }}
-                  style={{ background: "none", border: "none", padding: 0, color: colors.brand, cursor: "pointer", fontFamily: colors.font, fontSize: 13, textDecoration: "underline" }}>
-                  Ver todos
-                </button>
-              </div>
-            )}
-
-            {/* El título principal es el tipo de lead. Debajo, cuántos hay en
-                cada etapa de ese tipo; tocar una deja ver solo esa. */}
-            {grupos.map(g => (
-              <div key={g.tipo || "sin"} style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: g.color }}>{g.label}</span>
-                  <span style={{ fontSize: 12, color: colors.muted }}>{g.leads.length}</span>
-                  {!g.tipo && <span style={{ fontSize: 11.5, color: colors.warning }}>Elegí de qué tipo es cada uno: eso decide sus etapas.</span>}
-                </div>
-                {(cuentas[g.tipo] || []).some(e => e.cuantos > 0) && (
-                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
-                    {(cuentas[g.tipo] || []).map(e => {
-                      const activa = soloEtapa === e.id;
-                      return (
-                        <button key={e.id} disabled={!e.cuantos} onClick={() => setSoloEtapa(activa ? null : e.id)}
-                          style={{ border: `1px solid ${activa ? g.color : colors.border}`, background: activa ? g.color : e.cuantos ? "#fff" : "transparent",
-                            color: activa ? "#fff" : e.cuantos ? colors.inkSoft : colors.muted, borderRadius: 14, padding: "3px 10px", fontSize: 11.5,
-                            cursor: e.cuantos ? "pointer" : "default", fontFamily: colors.font, opacity: e.cuantos ? 1 : 0.7 }}>
-                          {e.nombre}{e.cuantos ? <strong style={{ marginLeft: 5 }}>{e.cuantos}</strong> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, overflow: "hidden" }}>
-                  {g.leads.map(l => {
-                    const clase = claseDeAviso[String(l.id)];
-                    // Cuánto va su lista: con una sola tarea no hay checklist que medir.
-                    const avance = avanceDe(tareasDe(l.id));
-                    return (
-                      <div key={l.id} className="lead-tarjeta" onClick={() => setAbierto(l)}
-                        style={{ borderLeft: `3px solid ${clase ? colors.danger : g.color}` }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, overflowWrap: "anywhere" }}>{l.nombre}</div>
-                          <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 1 }}>
-                            {[l.contacto, l.responsable_nombre].filter(Boolean).join(" · ") || "sin responsable"}
-                          </div>
-                          {avance.total > 1 && (
-                            <div className="avance-del-lead" title="Puntos hechos del checklist de este lead"
-                              style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4, maxWidth: 190 }}>
-                              <div style={{ flex: 1, height: 4, background: colors.neutralSoft, borderRadius: 2, overflow: "hidden" }}>
-                                <div style={{ width: `${Math.round((avance.hechas / avance.total) * 100)}%`, height: "100%", background: colors.success }} />
-                              </div>
-                              <span style={{ fontSize: 10.5, color: colors.inkSoft, whiteSpace: "nowrap" }}>Checklist · {avance.hechas} de {avance.total}</span>
-                            </div>
-                          )}
-                        </div>
-                        <EstadoDelLead lead={l} tareas={tareasDe(l.id)} catalogo={catalogo} currentUser={currentUser}
-                          editable={puedeEditar && nivelProyecto(l.id) !== "ver"} onCambio={alCambiar} onTareas={cargarTareas} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+            <TableroDelPipeline leads={perseguidos} tareasDe={tareasDe} catalogo={catalogo} currentUser={currentUser} filtro={filtro}
+              editableDe={l => puedeEditar && nivelProyecto(l.id) !== "ver"} onAbrir={setAbierto} onCambio={alCambiar} />
 
             {/* Lo aprobado salió del pipeline: tiene su lista, con la ficha de
                 cada proyecto armada sola. Acá queda solo la puerta. */}

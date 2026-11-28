@@ -8,7 +8,7 @@ import {
   cargarTareas, agregarTarea, agregarVarias, mostrarAlCliente, escribirleAlCliente, enviarChecklist, marcarItem, marcarEspera, guardarNota, borrarItem, asegurarTarea, ponerFecha,
   anotarCorreccion, anotar, cargarHistorial, anotarEnLaTarea, mostrarNotaAlCliente, moverDeEtapa, cargarArchivosDelCliente, pedirAprobacion, ponerPlazoDeAprobacion,
 } from "./proyecto";
-import { renglonesDeLista, avanceDe, porEtapa, conTitulosDeEtapa, avancePorEtapa, estadoDeActividad, alAvanzar } from "./tareasDelProyecto";
+import { renglonesDeLista, avanceDe, avancePorEtapa, estadoDeActividad, alAvanzar } from "./tareasDelProyecto";
 import { gentePara } from "../controlObra/ordenesDeCambio";
 import { deAfuera } from "../controlObra/directorioDelProyecto.js";
 import { ultimaAnotacion } from "./historialDeTarea";
@@ -16,6 +16,9 @@ import HistorialDeTarea from "../../components/HistorialDeTarea";
 import EnlaceDelCliente from "../observaciones/EnlaceDelCliente";
 import FotosYArchivosDelCliente from "./FotosYArchivosDelCliente";
 import PedirAprobacion from "./PedirAprobacion";
+import { useArrastre } from "../../lib/arrastrarConElDedo";
+import { useAvisoAbajo } from "../../components/AvisoAbajo";
+import { COLUMNAS_DE_ACTIVIDAD, columnaDeActividad, alSoltarActividad, loQuePaso, despuesDeSoltar, lugarDeAntes } from "./tablero";
 import { cuantosDice } from "./archivosDelCliente.js";
 import { plazoDe } from "./aprobaciones.js";
 
@@ -77,6 +80,15 @@ import { plazoDe } from "./aprobaciones.js";
 // EL PUNTO ABIERTO, CORTO: qué pasó, para cuándo, y su estado. Lo del cliente
 // y lo que se toca poco están a un toque, plegados.
 //
+// EN TRES COLUMNAS, Y LAS ETAPAS COMO UN CAMINO (27/11/2026). Hernán eligió
+// la maqueta en la que el proyecto es un tablero (tablero.js): arriba, sus
+// etapas en fila, cada una con cuánto va —en curso toda etapa con algo
+// abierto, no solo la del proyecto—; abajo, las actividades en EN CURSO · EN
+// ESPERA · HECHAS. Se mantiene apretada una y se suelta en otra columna (queda
+// en espera, se termina, se retoma) o sobre una etapa del camino (pasa a esa
+// etapa, para adelante o para atrás). Cada tarjeta es la misma fila de
+// siempre, con su ✓ que pregunta qué pasó; tocada, se abre a lo ancho debajo.
+//
 // LO QUE VE EL CLIENTE DE CADA PUNTO. Hernán, 17/11/2026, mirando RES BG: «el
 // cliente no ve el modelado en Revit... no sé por qué. Cliente debe ver las
 // actualizaciones de cada uno... ¿dónde se sube archivos relacionados? Estos
@@ -117,7 +129,7 @@ const LISTA_EN_BLANCO = { abierto: true, texto: "", assignee_id: "", due_date: "
  * @param onTareas  avisa cada vez que cambia la lista, con las filas enteras:
  *                  de ahí saca el encabezado cuál es el próximo paso
  */
-export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], users = [], currentUser, puede = () => true, editable = true, onBitacora, onTareas }) {
+export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], users = [], currentUser, puede = () => true, editable = true, onBitacora, onTareas, onMoverProyecto = null }) {
   const [abiertas, setAbiertas] = useState([]);
   const [hechas, setHechas] = useState([]);
   const [tareas, setTareas] = useState({});
@@ -143,13 +155,15 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // cada punto, con el enlace de cada foto para su miniatura.
   const [paraVer, setParaVer] = useState({ delProyecto: [], porTarea: {}, enlaces: {}, sinMigracion: false });
   const cargarArchivos = useCallback(async () => { setParaVer(await cargarArchivosDelCliente(lead.id)); }, [lead.id]);
-  // ARRASTRAR UN PUNTO A SU ETAPA. Las cotizaciones de RES BG habían nacido
-  // todas en «Ingenierías», que era donde estaba parado el proyecto; pasarlas
-  // a «Presupuesto» era abrir cada una y cambiarle la etapa. Se agarra el
-  // punto y se lo suelta sobre la etapa. El desplegable de cada punto sigue
-  // estando, que en el teléfono no se arrastra.
-  const [arrastrando, setArrastrando] = useState(null);   // el punto
-  const [sobre, setSobre] = useState(null);                // la etapa bajo el cursor
+  // ARRASTRAR UN PUNTO A SU ETAPA, O A OTRA COLUMNA. Las cotizaciones de RES BG
+  // habían nacido todas en «Ingenierías», donde estaba parado el proyecto;
+  // pasarlas a «Presupuesto» era abrir cada una y cambiarle la etapa. Se
+  // agarraba con el arrastre del navegador, que en el iPad no anda con el dedo:
+  // ahora se mantiene apretada y se suelta (lib/arrastrarConElDedo.js). El
+  // desplegable de etapa de cada punto sigue estando, en «Más».
+  const [soloEtapa, setSoloEtapa] = useState(null);   // la etapa tocada en el camino: "" es «sin etapa»
+  const [avisoAbajo, avisarAbajo] = useAvisoAbajo();
+  const { agarrar, arrastrando: agarrada, sobre: sobreQue } = useArrastre({ alSoltar: (item, lugar) => soltarActividad(item, lugar) });
   // Mandarle el checklist por correo: a quién y con qué líneas.
   const [envio, setEnvio] = useState(null);   // { a: Set, otro, mensaje, dijo, mal }
   const [error, setError] = useState("");
@@ -161,6 +175,9 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   // La tarea abierta: al tocarla cuenta qué se hizo, quién y cuándo, y ofrece
   // lo que se puede hacer con ella, con botones que dicen su nombre.
   const [abierta, setAbierta] = useState(null);
+  useEffect(() => {
+    if (abierta) setTimeout(() => document.querySelector(".actividad-abierta")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" }), 60);
+  }, [abierta]);
   // La gente de afuera que ya está en el proyecto: cliente, ingeniero,
   // proveedor. Una tarea puede ser de ellos aunque no entren a FOREMAN.
   //
@@ -220,6 +237,27 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     // Todo lo que se hace acá deja rastro en la bitácora, así que se la
     // refresca siempre en vez de acordarse caso por caso de avisarle.
     try { await fn(); await cargar(); onBitacora?.(); } finally { setOcupado(false); }
+  }
+
+  // SOLTAR UNA ACTIVIDAD en otra columna o sobre una etapa del camino.
+  async function soltarActividad(item, lugar, { deshaciendo = false } = {}) {
+    const pasos = alSoltarActividad(item, lugar);
+    if (!pasos.length) return;
+    let fallo = null;
+    await hacer(async () => {
+      for (const p of pasos) {
+        fallo = p.etapa !== undefined
+          ? await moverDeEtapa(item, p.etapa, { de: nombreDeEtapa(item.etapa_id, catalogo), a: nombreDeEtapa(p.etapa, catalogo) }, currentUser)
+          : p.marcar !== undefined ? await marcarItem(item, p.marcar, currentUser?.name, currentUser)
+          : await marcarEspera(item, p.espera, currentUser);
+        if (fallo) break;
+      }
+    });
+    if (fallo) { setError(fallo === "falta_migracion" ? "Falta correr una migración en Supabase para eso." : fallo); return; }
+    if (deshaciendo) { avisarAbajo("Quedó como estaba."); return; }
+    const volver = lugarDeAntes(item, lugar);
+    avisarAbajo(loQuePaso(item, lugar, id => nombreDeEtapa(id, catalogo)),
+      volver ? () => soltarActividad(despuesDeSoltar(item, pasos), volver, { deshaciendo: true }) : null);
   }
 
   // TERMINAR UN PUNTO, o volver a abrirlo. Ya no abre otro con otro nombre.
@@ -361,16 +399,12 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
   const fechaBloqueada = !!tareas[aTarea?.item?.tarea_id]?.due_date && !puede("tareas.fechas");
   const puedeCorrer = item => !tareas[item.tarea_id]?.due_date || puede("tareas.fechas");
 
-  // POR ETAPA. Lo abierto se lee agrupado: cada etapa con su título, en el
-  // orden del tipo del proyecto. Si todo es de la etapa en la que está el
-  // proyecto no hay títulos —arriba ya lo dice—.
+  // Las etapas del tipo del proyecto: el camino de arriba, y adónde se puede
+  // pasar una actividad. En cada tarjeta, su etapa se dice si el checklist
+  // tiene puntos de más de una y no se está mirando una sola.
   const etapas = etapasDelTipo(catalogo, tipoDe(lead));
-  const grupos = porEtapa(abiertas, etapas, { nombreDe: id => nombreDeEtapa(id, catalogo), etapaDelProyecto: etapaId });
-  const conTitulos = conTitulosDeEtapa(grupos, etapaId);
-  // En lo hecho, que va plegado y sin títulos, la etapa se dice en la fila; y
-  // solo si el checklist tiene puntos de más de una.
   const variasEtapas = new Set([...abiertas, ...hechas].map(i => i.etapa_id || "")).size > 1;
-  const etapaDe = item => (item.hecho && variasEtapas && item.etapa_id ? nombreDeEtapa(item.etapa_id, catalogo) || "" : "");
+  const etapaDe = item => (variasEtapas && soloEtapa === null && item.etapa_id ? nombreDeEtapa(item.etapa_id, catalogo) || "" : "");
   const cambiarEtapa = (item, id) => hacer(async () => {
     const e = await moverDeEtapa(item, id, { de: nombreDeEtapa(item.etapa_id, catalogo), a: nombreDeEtapa(id, catalogo) }, currentUser);
     if (e) setError(e);
@@ -385,10 +419,10 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     </select>
   );
 
-  const fila = item => (
+  const fila = (item, enColumna = false) => (
     <Actividad key={item.id} item={item} etiqueta={etapaDe(item)} tarea={tareas[item.tarea_id]} users={users}
-      onAgarrar={editable && etapas.length > 0 ? agarrado => { setArrastrando(agarrado ? item : null); if (!agarrado) setSobre(null); } : null}
-      abierta={abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
+      onAgarrar={null} enTarjeta={enColumna}
+      abierta={!enColumna && abierta === item.id} onAbrir={() => setAbierta(a => (a === item.id ? null : item.id))}
       onMarcar={hecho => marcar(item, hecho)} onAvanzar={datos => avanzar(item, datos)}
       onEspera={espera => hacer(async () => { const e = await marcarEspera(item, espera, currentUser); if (e) setError(e); })}
       ocupado={ocupado} hacer={hacer} currentUser={currentUser} editable={editable} puedeCorrer={puedeCorrer(item)}
@@ -414,7 +448,6 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
     nombreDe: id => nombreDeEtapa(id, catalogo), etapaDelProyecto: etapaId, elCamino: sePersigue(lead),
   });
   const conCamino = camino.length > 1 || (camino.length === 1 && camino[0].id);
-  const todasLasAbiertas = abiertas.length;
 
   return (
     <div>
@@ -447,45 +480,82 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         </div>
       )}
 
-      {/* EL PIPELINE DEL PROYECTO: cada etapa con cuánto va. La que tiene el
-          borde marcado es en la que está el proyecto. Tocar una abre «Agregar»
-          ya parado en esa etapa. */}
+      {/* EL CAMINO DE ETAPAS: cada una con cuánto va. «Está acá» es la del
+          proyecto; «en curso», toda etapa con algo abierto —RES BG tiene cosas
+          en Ingenierías y en Presupuesto a la vez—. Tocar una deja ver solo
+          lo suyo, y ofrece agregar ahí o mover el proyecto. Soltar una
+          actividad encima la pasa a esa etapa. */}
       {conCamino && (
-        <div className="camino-de-etapas" style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-            {camino.map(e => {
-              const tono = e.estado === "lista" ? colors.success : e.estado === "en_curso" ? colors.brand : colors.muted;
+        <div className="camino-de-etapas" style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: 14, padding: "12px 8px 10px", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            {camino.map((e, k) => {
+              const abiertasAca = e.total - e.hechas;
+              const iActual = camino.findIndex(x => x.actual);
               const sePuede = editable && !!e.id && etapas.some(x => x.id === e.id);
+              const lugar = `etapa:${e.id}`;
+              const encima = sePuede && agarrada && sobreQue === lugar;
+              const elegida = soloEtapa === (e.id || "");
               return (
                 <button key={e.id || "sin-etapa"} className="etapa-del-camino" data-estado={e.estado} data-actual={e.actual ? "si" : "no"}
-                  onDragOver={ev => { if (arrastrando && sePuede) { ev.preventDefault(); if (sobre !== e.id) setSobre(e.id); } }}
-                  onDragLeave={() => setSobre(x => (x === e.id ? null : x))}
-                  onDrop={ev => {
-                    if (!arrastrando || !sePuede) return;
-                    ev.preventDefault();
-                    const punto = arrastrando;
-                    setArrastrando(null); setSobre(null);
-                    if ((punto.etapa_id || null) !== e.id) cambiarEtapa(punto, e.id);
-                  }}
-                  disabled={!sePuede}
-                  onClick={() => { setPegar({ abierto: false }); setError(""); setNuevo({ ...EN_BLANCO, etapa: e.id }); }}
-                  title={`${e.nombre}: ${e.total ? `${e.hechas} de ${e.total} ${e.total === 1 ? "hecho" : "hechos"}` : "todavía sin puntos"}`
-                    + `${e.actual ? " · es la etapa en la que está el proyecto" : ""}${sePuede ? " · tocá para agregar un punto acá" : ""}`}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: colors.font, fontSize: 11, lineHeight: 1.2,
-                    padding: "4px 9px", borderRadius: 14, cursor: sePuede ? "pointer" : "default",
-                    border: `${e.actual ? 2 : 1}px solid ${e.actual ? colors.brand : colors.border}`,
-                    outline: sobre === e.id ? `2px dashed ${colors.brand}` : "none", outlineOffset: 2,
-                    background: sobre === e.id ? colors.brandSoft : e.estado === "lista" ? colors.successSoft : "#fff", color: e.total ? colors.ink : colors.muted }}>
-                  {e.estado === "lista" && <Check size={11} color={colors.success} />}
-                  <span style={{ fontWeight: e.actual ? 700 : 500 }}>{e.nombre}</span>
-                  {e.total > 0 && <span style={{ color: tono, fontWeight: 700 }}>{e.hechas}/{e.total}</span>}
+                  data-soltar={sePuede ? lugar : undefined} aria-pressed={elegida}
+                  onClick={() => setSoloEtapa(x => (x === (e.id || "") ? null : e.id || ""))}
+                  title={`${e.nombre}: ${e.total ? `${e.hechas} de ${e.total} ${e.total === 1 ? "hecha" : "hechas"}` : "todavía sin actividades"}`
+                    + `${e.actual ? " · es la etapa en la que está el proyecto" : ""} · tocá para ver solo lo suyo`}
+                  style={{ flex: "1 0 104px", position: "relative", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center",
+                    border: "none", borderRadius: 10, padding: "2px 4px 6px", cursor: "pointer", fontFamily: colors.font,
+                    background: encima ? colors.brandSoft : elegida ? colors.bg : "transparent", outline: encima ? `2px dashed ${colors.brand}` : "none" }}>
+                  {k > 0 && <span aria-hidden="true" style={{ position: "absolute", top: 19, left: "-50%", right: "50%", height: 3, background: k <= iActual ? colors.brand : colors.neutralSoft }} />}
+                  <span className="bola-de-etapa" style={{ position: "relative", zIndex: 1, width: e.actual ? 40 : 36, height: e.actual ? 40 : 36, marginTop: e.actual ? 0 : 2, borderRadius: "50%",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800,
+                    border: `2.5px solid ${e.estado === "lista" || abiertasAca || e.actual ? colors.brand : colors.border}`,
+                    background: e.estado === "lista" ? colors.brand : "#fff", color: e.estado === "lista" ? "#fff" : abiertasAca || e.actual ? colors.brand : colors.muted,
+                    boxShadow: e.actual ? `0 0 0 5px ${colors.brandSoft}` : "none" }}>
+                    {e.estado === "lista" ? <Check size={15} /> : abiertasAca || k + 1}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, marginTop: 6, color: e.actual || abiertasAca ? colors.brand : colors.inkSoft, textDecoration: elegida ? "underline" : "none", textUnderlineOffset: 3 }}>{e.nombre}</span>
+                  <span style={{ fontSize: 10.5, color: colors.muted, marginTop: 1 }}>
+                    {e.total ? (abiertasAca ? `${abiertasAca} ${abiertasAca === 1 ? "abierta" : "abiertas"}${e.hechas ? ` · ${e.hechas} ${e.hechas === 1 ? "hecha" : "hechas"}` : ""}` : `${e.hechas} ${e.hechas === 1 ? "hecha" : "hechas"}`) : "—"}
+                  </span>
+                  {e.total > 0 && (
+                    <span style={{ width: 60, height: 5, borderRadius: 5, background: colors.neutralSoft, marginTop: 4, overflow: "hidden" }}>
+                      <span style={{ display: "block", height: "100%", width: `${Math.round((e.hechas / e.total) * 100)}%`, background: colors.brand }} />
+                    </span>
+                  )}
+                  {e.actual
+                    ? <span className="esta-aca" style={marquita(true)}>ESTÁ ACÁ</span>
+                    : abiertasAca > 0 ? <span className="en-curso-aca" style={marquita(false)}>EN CURSO</span> : null}
                 </button>
               );
             })}
           </div>
-          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5, lineHeight: 1.45 }}>
-            {editable ? "Tocá el ✓ de un punto para decir qué pasó: avanzó, queda en espera o terminó." : "Cada punto dice en qué está."}
-            {editable && etapas.length > 0 && todasLasAbiertas > 0 ? " Para pasarlo a otra etapa, arrastralo hasta ella." : ""}
+          {soloEtapa !== null && (() => {
+            const e = camino.find(x => (x.id || "") === soloEtapa);
+            if (!e) return null;
+            const delTipo = !!e.id && etapas.some(x => x.id === e.id);
+            return (
+              <div className="etapa-elegida" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 11.5, color: colors.inkSoft,
+                marginTop: 8, paddingTop: 8, borderTop: `1px solid ${colors.neutralSoft}` }}>
+                <span>Solo las de <strong>{e.nombre}</strong></span>
+                <button onClick={() => setSoloEtapa(null)} style={{ background: "none", border: "none", padding: 0, color: colors.muted, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, textDecoration: "underline" }}>ver todas</button>
+                {editable && delTipo && (
+                  <button onClick={() => { setPegar({ abierto: false }); setError(""); setNuevo({ ...EN_BLANCO, etapa: e.id }); }} style={{ ...mini(false), padding: "4px 10px" }}>
+                    <Plus size={11} /> Agregar acá
+                  </button>
+                )}
+                {editable && delTipo && !e.actual && onMoverProyecto && sePersigue(lead) && (
+                  <button className="mover-el-proyecto-aca" disabled={ocupado}
+                    onClick={() => hacer(async () => { const err = await onMoverProyecto(e.id); if (err) setError(err); else avisarAbajo(`${lead.nombre} pasó a ${e.nombre}.`); })}
+                    style={{ ...mini(false), padding: "4px 10px", background: colors.brand, borderColor: colors.brand, color: "#fff" }}>
+                    Mover el proyecto acá
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.45, padding: "0 4px" }}>
+            {editable
+              ? "Tocá el ✓ de un punto para decir qué pasó: avanzó, queda en espera o terminó. O mantené apretada una actividad y soltala en otra columna, o sobre una etapa para pasarla ahí: para adelante o para atrás. Tocá una etapa para ver solo lo suyo."
+              : "Cada actividad dice en qué está."}
           </div>
         </div>
       )}
@@ -649,25 +719,9 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
         </div>
       )}
 
-      <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px" }}>
-        {grupos.map((g, k) => (
-          <div key={g.id || "sin-etapa"} className="grupo-de-etapa">
-            {conTitulos && (
-              <div className="etapa-del-checklist"
-                style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: g.actual ? colors.brand : colors.muted,
-                  padding: k ? "12px 0 3px" : "8px 0 3px" }}>
-                {g.nombre.toUpperCase()} · {g.items.length}
-                {g.actual && <span style={{ fontWeight: 400, letterSpacing: 0 }}> · la etapa en la que está el proyecto</span>}
-              </div>
-            )}
-            {g.items.map(fila)}
-          </div>
-        ))}
-        {!abiertas.length && hechas.length > 0 && (
-          <div style={{ fontSize: 12, color: colors.muted, padding: "8px 0" }}>No queda nada abierto.</div>
-        )}
-        {/* VACÍO NO ES MUDO: dice que el checklist va acá y con qué se empieza. */}
-        {!abiertas.length && !hechas.length && (
+      {/* VACÍO NO ES MUDO: dice que el checklist va acá y con qué se empieza. */}
+      {!abiertas.length && !hechas.length ? (
+        <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px" }}>
           <div className="checklist-vacio" style={{ padding: "10px 0" }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.ink }}>Este proyecto todavía no tiene checklist.</div>
             <div style={{ fontSize: 11.5, color: colors.inkSoft, lineHeight: 1.5, marginTop: 2 }}>
@@ -685,26 +739,63 @@ export default function ListaDeTareas({ lead, etapaId = null, catalogo = [], use
               </div>
             )}
           </div>
-        )}
-      </div>
-
-      {/* Lo hecho, plegado: es la historia del proyecto, no lo que hay que
-          mirar al abrirlo. */}
-      {hechas.length > 0 && (
-        <div style={{ marginTop: 8 }}>
-          <button onClick={() => setVerHechas(v => !v)}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, color: colors.inkSoft,
-              display: "inline-flex", alignItems: "center", gap: 4 }}>
-            {verHechas ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {hechas.length === 1 ? "1 hecho" : `${hechas.length} hechos`}
-          </button>
-          {verHechas && (
-            <div style={{ background: colors.surface, border: `1px solid ${colors.border}`, borderRadius: colors.radiusMd, padding: "4px 12px", marginTop: 6 }}>
-              {hechas.map(fila)}
-            </div>
-          )}
+        </div>
+      ) : (
+        <div className="tablero-de-actividades" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 10, alignItems: "start" }}>
+          {COLUMNAS_DE_ACTIVIDAD.map(c => {
+            const deEsta = (c.id === "hechas" ? hechas : abiertas.filter(i => columnaDeActividad(i) === c.id))
+              .filter(i => soloEtapa === null || (i.etapa_id || "") === soloEtapa);
+            // Lo hecho es la historia: se ven las últimas, y el resto a un toque.
+            const muestro = c.id === "hechas" && !verHechas ? deEsta.slice(0, 5) : deEsta;
+            const lugar = `col:${c.id}`;
+            const encima = agarrada && sobreQue === lugar;
+            return (
+              <div key={c.id} className="columna-de-actividades" data-columna={c.id} data-soltar={editable ? lugar : undefined}
+                style={{ background: encima ? colors.brandSoft : colors.bg, border: `2px solid ${encima ? colors.brand : "transparent"}`, borderRadius: 14,
+                  padding: 8, minHeight: 110, transition: "background .12s" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "2px 4px 8px", fontSize: 12.5, fontWeight: 700, color: colors.ink }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: c.id === "curso" ? colors.brand : c.id === "espera" ? colors.warning : colors.success }} />
+                  {c.nombre} <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{deEsta.length}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 10.5, color: colors.muted, fontWeight: 500 }}>{c.ayuda}</span>
+                </div>
+                {muestro.map(item => {
+                  const props = editable ? agarrar(item) : {};
+                  return (
+                    <div key={item.id} className="tarjeta-de-actividad" data-id={item.id} {...props}
+                      style={{ ...props.style, cursor: editable ? "grab" : "default", background: "#fff", borderRadius: 11, padding: "0 9px", marginBottom: 7,
+                        border: `1px solid ${abierta === item.id ? colors.brand : colors.border}`, boxShadow: abierta === item.id ? `0 0 0 2px ${colors.brandSoft}` : "0 1px 2px rgba(16,24,40,.04)" }}>
+                      {fila(item, true)}
+                    </div>
+                  );
+                })}
+                {!deEsta.length && (
+                  <div style={{ fontSize: 11.5, color: colors.muted, padding: "4px 6px 6px" }}>
+                    {c.id === "curso" ? "Nada en curso." : c.id === "espera" ? "Nada en espera." : "Todavía nada hecho."}
+                  </div>
+                )}
+                {c.id === "hechas" && deEsta.length > 5 && (
+                  <button onClick={() => setVerHechas(v => !v)}
+                    style={{ background: "none", border: "none", padding: "2px 6px", cursor: "pointer", fontFamily: colors.font, fontSize: 11.5, color: colors.inkSoft, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    {verHechas ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    {verHechas ? "ver solo las últimas" : `ver las ${deEsta.length}`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+
+      {/* LA ACTIVIDAD ABIERTA, a lo ancho: qué pasó, para cuándo, lo del cliente. */}
+      {(() => {
+        const item = abierta && [...abiertas, ...hechas].find(i => i.id === abierta);
+        return item ? (
+          <div className="actividad-abierta" style={{ background: colors.surface, border: `1.5px solid ${colors.brand}`, borderRadius: 14, padding: "2px 12px", marginTop: 10, scrollMarginBottom: 20 }}>
+            {fila(item)}
+          </div>
+        ) : null;
+      })()}
+      {avisoAbajo}
 
       {/* EL CHECKLIST QUE VE EL CLIENTE. Qué ve de esta lista y su enlace, en
           el mismo lugar donde se decide. Está a la vista aunque todavía no
@@ -1014,7 +1105,7 @@ const boton = fuerte => ({
 // al tocarla: ¿PARA CUÁNDO? · ¿QUÉ PASÓ? · LO QUE VE EL CLIENTE DE ESTE PUNTO ·
 // ¿YA ESTÁ?. Al pie, lo que se toca poco. Y se cierra: arriba, abajo y con la
 // flecha.
-function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, onPedirAprobacion = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onAvanzar = null, onEspera = null }) {
+function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupado, hacer, currentUser, editable = true, puedeCorrer = true, onTarea, onAvisar, laVeElCliente = false, onCliente = null, hayCliente = false, sinNotas = false, aprobacion = null, sinAprobacion = false, onPedirAprobacion = null, delCliente = null, sinReporte = false, anotado = [], pasado = [], etapas = [], onEtapa = null, etapaVieja = null, lead = null, archivos = [], enlaces = {}, sinArchivos = false, onArchivos = null, onAgarrar = null, onMarcar = null, onAvanzar = null, onEspera = null, enTarjeta = false }) {
   const [nota, setNota] = useState(item.nota || "");
   // EL ✓ PREGUNTA QUÉ PASÓ: null · "elegir" (los tres botones) · "avanzo" (se escribe qué sigue).
   const [pregunta, setPregunta] = useState(null);
@@ -1115,6 +1206,15 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
     aprobacion ? (aprobacion.estado === "aprobado" ? "lo aprobó" : aprobacion.estado === "observado" ? "dejó observaciones" : "espera su aprobación") : null,
   ].filter(Boolean).join(" · ");
 
+  // EN QUÉ ESTÁ, en una pastilla. En una columna, «en curso», «en espera» y
+  // «hecha» ya lo dice la columna: queda la fecha, y va debajo del título, que
+  // la columna es angosta y al lado le comía el ancho.
+  const pastilla = enTarjeta && ["curso", "espera", "hecha"].includes(est.clase) ? null : (
+    <span className="estado-de-la-actividad" data-estado={est.clase} style={pildora(est.clase)}>
+      {est.clase === "espera" && <Hourglass size={10} />}{est.dice}
+    </span>
+  );
+
   return (
     <div className="punto-del-checklist" data-id={item.id}
       // Cerrado se agarra entero para llevarlo a otra etapa; abierto no, que
@@ -1122,7 +1222,7 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
       draggable={!!onAgarrar && !abierta}
       onDragStart={ev => { if (!onAgarrar || abierta) return; try { ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", String(item.id)); } catch { /* sin eso se arrastra igual */ } onAgarrar(true); }}
       onDragEnd={() => onAgarrar?.(false)}
-      style={{ borderBottom: `1px solid ${colors.neutralSoft}`, background: abierta ? colors.bg : "transparent",
+      style={{ borderBottom: enTarjeta ? "none" : `1px solid ${colors.neutralSoft}`, background: abierta ? colors.bg : "transparent",
         margin: abierta ? "0 -12px" : 0, padding: abierta ? "0 12px" : 0, cursor: onAgarrar && !abierta ? "grab" : "auto" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0" }}>
         <button className="que-paso-con-el-punto" disabled={ocupado || !editable} aria-expanded={!!pregunta}
@@ -1157,11 +1257,10 @@ function Actividad({ item, etiqueta, tarea, users = [], abierta, onAbrir, ocupad
               <span style={{ color: colors.muted }}>{cuando(ultima.created_at)} · </span>{ultima.texto}
             </div>
           )}
+          {enTarjeta && pastilla && <div style={{ marginTop: 4 }}>{pastilla}</div>}
         </div>
         {/* EN QUÉ ESTÁ, a la derecha y siempre en el mismo lugar. */}
-        <span className="estado-de-la-actividad" data-estado={est.clase} style={pildora(est.clase)}>
-          {est.clase === "espera" && <Hourglass size={10} />}{est.dice}
-        </span>
+        {!enTarjeta && pastilla}
         {/* La flecha dice que la fila se abre, y la cierra. */}
         <button className="abrir-o-cerrar" onClick={onAbrir} aria-expanded={abierta} aria-label={abierta ? "Cerrar este punto" : "Abrir este punto"}
           title={abierta ? "Cerrar" : "Abrir: qué pasó, para cuándo, y lo del cliente"}
@@ -1537,6 +1636,12 @@ const pildora = cual => ({
 // Lo que está plegado, y se abre de un toque.
 const pliegue = { display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", background: "none", border: "none", padding: 0, cursor: "pointer",
   fontFamily: colors.font, fontSize: 10.5, color: colors.muted };
+
+// «ESTÁ ACÁ» (la etapa del proyecto) y «EN CURSO» (otra con algo abierto).
+const marquita = fuerte => ({
+  fontSize: 9.5, fontWeight: 800, letterSpacing: 0.3, borderRadius: 10, padding: "1px 7px", marginTop: 5,
+  background: fuerte ? colors.brand : colors.brandSoft, color: fuerte ? "#fff" : colors.brand,
+});
 
 const mini = activo => ({
   display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontWeight: 600, cursor: "pointer", fontFamily: colors.font,

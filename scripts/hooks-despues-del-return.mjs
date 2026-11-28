@@ -40,7 +40,9 @@ for (const archivo of archivos("src")) {
     // componentes tiene tres returns tempranos y ninguno alcanza al de abajo.
     // Sin esto el chequeo marcaba 109 cosas, todas sanas, que es como se
     // consigue que nadie lo vuelva a correr.
-    if (/^(export\s+)?(default\s+)?function\s+[A-Z]/.test(linea)
+    // Un hook propio (`function useArrastre`) también: es un componente sin
+    // pantalla, y lo de arriba de él en el archivo son otras funciones.
+    if (/^(export\s+)?(default\s+)?function\s+(?:[A-Z]|use[A-Z])/.test(linea)
       || /^const\s+[A-Z]\w*\s*=\s*(\(|function|React\.memo|memo\()/.test(linea)) returnEn = 0;
     // Un `return` al principio de un componente, no los de dentro de una
     // función anidada: por eso se mira la sangría, de 2 a 6 espacios.
