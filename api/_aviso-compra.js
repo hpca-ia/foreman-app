@@ -35,6 +35,13 @@ export default async function handler(req, res) {
     const [compra] = await json(await rest(
       `compras_solicitudes?id=eq.${solicitudId}&select=id,descripcion,estado,monto_estimado,lead_id,solicitante_id,solicitante_nombre,aprobador_id,comprado_por`));
     if (!compra) return res.status(404).json({ error: "No se encontró la solicitud" });
+    // SU CÓDIGO (migración 202), para que el correo diga de cuál se habla:
+    // «PR15-TR22 · ODC6». Se pide aparte: sin la 202 vuelve vacío y el correo
+    // sale como antes.
+    const [conTr] = await json(await rest(`compras_solicitudes?id=eq.${solicitudId}&select=tr`));
+    const codigo = conTr?.tr
+      ? `${compra.lead_id ? `PR${compra.lead_id}-` : ""}TR${conTr.tr} · ODC${compra.id}`
+      : `compra N° ${compra.id}`;
 
     const [historial, usuarios, leads, accesos] = await Promise.all([
       json(await rest(`compras_historial?solicitud_id=eq.${solicitudId}&select=usuario_id`)),
@@ -66,10 +73,10 @@ export default async function handler(req, res) {
     const r = await enviarCorreo({
       to: [...new Set(para)],
       responderA: autor?.email ? [autor.email] : null,
-      subject: que ? `${que} · compra N° ${compra.id} · ${compra.descripcion}` : `Comentario en la compra · ${compra.descripcion}`,
+      subject: que ? `${que} · ${codigo} · ${compra.descripcion}` : `Comentario en la compra · ${codigo} · ${compra.descripcion}`,
       html: plantilla({
         titulo: que ? `${que} en la compra N° ${compra.id}` : "Comentario en una solicitud de compra",
-        subtitulo: [obra, compra.descripcion].filter(Boolean).join(" · "),
+        subtitulo: [obra, conTr?.tr ? codigo : "", compra.descripcion].filter(Boolean).join(" · "),
         cuerpo: `
           <p style="margin:0 0 12px;font-size:14px;color:#1A1A1A">
             <strong>${esc(autor?.nombre || "Alguien")}</strong> ${que ? `dejó un pendiente en esta compra${pendiente.paraNombre ? ` para <strong>${esc(pendiente.paraNombre)}</strong>` : ""}` : "escribió sobre esta compra"}:

@@ -10,6 +10,7 @@ import { useState } from "react";
 import { AlertOctagon, AlertTriangle, ShieldCheck, Trash2, Link2, FileX, Layers, Inbox } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
+import Traza from "../../components/Traza";
 import { fmt } from "./calculos";
 import { alertasDeLaObra } from "./contadoDosVeces.js";
 import { engancharYPonerAlDia } from "../compras/compras";
@@ -116,6 +117,7 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                     <div style={nombre}>
                       {f.razon_social || "Sin proveedor"}
                       {f.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{f.numero_factura}</span>}
+                      {f._traza && <Traza t={f._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                     </div>
                     <div style={detalle}>
                       {f.fecha} · {nombrePlanilla(f.planilla_id)} · entró {ORIGEN[f.origen] || f.origen || "—"}
@@ -175,6 +177,7 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                     <div style={nombre}>
                       {c.factura.razon_social || "Sin proveedor"}
                       {c.factura.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{c.factura.numero_factura}</span>}
+                      {c.factura._traza && <Traza t={c.factura._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                       {c.factura.clase === "anticipo" && <span style={{ color: colors.warning, fontWeight: 600 }}> · anticipo</span>}
                     </div>
                     <div style={detalle}>{c.factura.fecha} · {nombrePlanilla(c.factura.planilla_id)}</div>
@@ -208,6 +211,7 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                 <div style={nombre}>
                   {x.factura.razon_social || "Sin proveedor"}
                   {x.factura.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{x.factura.numero_factura}</span>}
+                  {x.factura._traza && <Traza t={x.factura._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                 </div>
                 <div style={detalle}>
                   {x.factura.fecha} · entró {ORIGEN[x.factura.origen] || x.factura.origen || "—"}{x.factura.subido_por_nombre ? ` por ${x.factura.subido_por_nombre}` : ""}
@@ -233,6 +237,7 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                 <div style={nombre}>
                   {x.factura.razon_social || "Sin proveedor"}
                   {x.factura.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{x.factura.numero_factura}</span>}
+                  {x.factura._traza && <Traza t={x.factura._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                 </div>
                 <div style={detalle}>
                   Vale ${fmt(x.factura.total)} y está asignada por ${fmt(x.asignado)}
@@ -277,6 +282,7 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
                 <div style={nombre}>
                   {x.factura.razon_social || "Sin proveedor"}
                   {x.factura.numero_factura && <span style={{ color: colors.muted, fontWeight: 400 }}> · #{x.factura.numero_factura}</span>}
+                  {x.factura._traza && <Traza t={x.factura._traza} estilo={{ marginLeft: 6, verticalAlign: "middle" }} />}
                 </div>
                 <div style={detalle}>
                   {x.factura.fecha} · {nombrePlanilla(x.factura.planilla_id)}

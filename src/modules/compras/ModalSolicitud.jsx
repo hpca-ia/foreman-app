@@ -29,6 +29,8 @@ import { numeroDeCompra, tituloDelPaso, ultimaDevolucion, cotizacionesDesdeQueSe
 import { esAdmin } from "../../lib/roles";
 import PendientesDeCompra from "./PendientesDeCompra";
 import AnexosDelGasto from "../../components/AnexosDelGasto";
+import Traza from "../../components/Traza";
+import { trazasDeCompras } from "../../lib/origenes";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -206,6 +208,15 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
 
   useEffect(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
   const recargarHistorial = useCallback(() => { if (viva?.id) historialDe(viva.id).then(setHistorial); }, [viva?.id]);
+  // Su traza: la TR, y la caja y la planilla de su factura cuando ya la tiene.
+  const [laTraza, setLaTraza] = useState(null);
+  useEffect(() => {
+    if (!viva?.id) { setLaTraza(null); return; }
+    let vivo = true;
+    trazasDeCompras([{ id: viva.id, tr: viva.tr, lead_id: viva.lead_id, factura_id: viva.factura_id }])
+      .then(t => { if (vivo) setLaTraza(t[viva.id] || null); }, () => {});
+    return () => { vivo = false; };
+  }, [viva?.id, viva?.tr, viva?.lead_id, viva?.factura_id]);
 
   const inp = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -832,6 +843,8 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink, flex: 1, minWidth: 140 }}>
           {editando ? <>Solicitud de compra <span className="numero-de-compra" style={{ color: colors.muted, fontWeight: 600 }}>{numeroDeCompra(viva)}</span></> : "Pedir algo para la obra"}
+          {/* Su código: la misma TR que va a llevar su factura en el control. */}
+          {editando && laTraza && <div style={{ fontWeight: 400, marginTop: 2 }}><Traza t={laTraza} estilo={{ fontSize: 11.5 }} /></div>}
         </div>
         {editando && (
           <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: "#fff", background: e.color }}>

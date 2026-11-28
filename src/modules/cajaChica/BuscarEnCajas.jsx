@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { abrirArchivo } from "../../lib/archivos";
 import { buscarEnGastos } from "./buscarEnGastos.js";
+import Traza from "../../components/Traza";
+import { trazasDeGastos, trUnidas } from "../../lib/origenes";
+import { codigosEnLaBusqueda, esLaBuscada } from "../../lib/trazabilidad";
 
 // BUSCAR EN TODAS LAS CAJAS (Hernán, 28/11/2026: «en caja chica quiero poder
 // escribir RUC, factura o nombre del establecimiento y que me salgan todos los
@@ -19,7 +22,13 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
   const [gastos, setGastos] = useState(null);
   const [cierres, setCierres] = useState({});
   const [error, setError] = useState("");
+  // La traza de cada gasto: su TR, la orden de compra si la hubo y la planilla
+  // del control donde quedó su factura.
+  const [trazas, setTrazas] = useState({});
+  const [unidas, setUnidas] = useState({});
   const clave = cajas.map(c => c.id).join(",");
+  const cajasRef = useRef(cajas);
+  cajasRef.current = cajas;
 
   // Se leen al empezar a escribir, no al abrir la lista: la mayoría de las
   // veces se entra a una caja y nadie busca.
@@ -34,7 +43,7 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
         const parte = ids.slice(i, i + 100);
         const [{ data, error: e }, { data: cs }] = await Promise.all([
           supabase.from("cajas_gastos")
-            .select("id,caja_id,descripcion,proveedor,ruc,numero_factura,monto,fecha,tipo,estado,notas,archivo_url,archivo_nombre,cierre_id,subido_por_nombre")
+            .select("*")
             .in("caja_id", parte).order("fecha", { ascending: false }),
           supabase.from("cajas_cierres").select("id,numero").in("caja_id", parte),
         ]);
@@ -43,11 +52,24 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
         (cs || []).forEach(c => { vueltas[c.id] = c.numero; });
       }
       if (vivo) { setGastos(filas); setCierres(vueltas); }
+      // Después, y sin frenar la búsqueda: si falla, los gastos salen igual.
+      const [t, u] = await Promise.all([
+        trazasDeGastos(filas, cajasRef.current).catch(() => ({})), trUnidas().catch(() => ({})),
+      ]);
+      if (vivo) { setTrazas(t); setUnidas(u); }
     })().catch(e => vivo && setError(e.message));
     return () => { vivo = false; };
   }, [quiere, clave, gastos]);
 
-  const resultado = useMemo(() => (quiere && gastos ? buscarEnGastos(gastos, texto) : null), [quiere, gastos, texto]);
+  // SE BUSCA TAMBIÉN POR CÓDIGO: «TR52», «ODC6», «PL2», «CC9». Lo que no es
+  // código se busca como siempre, entre los gastos de ese código.
+  const resultado = useMemo(() => {
+    if (!quiere || !gastos) return null;
+    const codigos = codigosEnLaBusqueda(texto);
+    if (!codigos) return buscarEnGastos(gastos, texto);
+    const deEse = gastos.filter(g => esLaBuscada(trazas[g.id], codigos, unidas));
+    return codigos.resto ? buscarEnGastos(deEse, codigos.resto) : deEse;
+  }, [quiere, gastos, texto, trazas, unidas]);
   const caja = id => cajas.find(c => c.id === id);
 
   return (
@@ -55,7 +77,7 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px" }}>
         <Search size={14} color="var(--muted)" />
         <input value={texto} onChange={e => setTexto(e.target.value)}
-          placeholder="Buscar en todas las cajas: RUC, número de factura, local o lo que se compró"
+          placeholder="Buscar en todas las cajas: RUC, factura, local, lo que se compró, o un código (TR52, ODC6, PL2)"
           style={{ flex: 1, border: "none", outline: "none", fontSize: 13, fontFamily: "var(--font)", background: "transparent", color: "var(--ink)", minWidth: 0 }} />
         {texto && <button onClick={() => setTexto("")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: 0 }}><X size={14} /></button>}
       </div>
@@ -81,6 +103,7 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
                     {g.ruc && <span style={{ color: "var(--muted)", fontWeight: 400 }}> · RUC {g.ruc}</span>}
                   </div>
                   <div style={{ color: "var(--ink-soft)" }}>{g.descripcion}</div>
+                  {trazas[g.id] && <div><Traza t={trazas[g.id]} /></div>}
                   <div style={{ color: "var(--muted)", fontSize: 11 }}>
                     {fecha(g.fecha)} · <button onClick={() => c && onAbrir?.(c)}
                       style={{ background: "none", border: "none", padding: 0, color: "var(--brand)", cursor: "pointer", fontSize: 11, fontFamily: "var(--font)", textDecoration: "underline" }}>

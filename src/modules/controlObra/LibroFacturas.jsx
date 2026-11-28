@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Search, FileSpreadsheet, X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -12,6 +12,8 @@ import { esDeCajaChica, SIGLA_CAJA } from "./origenGasto";
 import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { Mini } from "./PanelFacturas";
 import { destinosPorFactura } from "./repartoDeFactura.js";
+import { codigoTR, codigosEnLaBusqueda, esLaBuscada, origenEnTexto } from "../../lib/trazabilidad";
+import { trUnidas } from "../../lib/origenes";
 
 // El libro de facturas de la obra: todas, o las de una planilla, con filtros.
 //
@@ -48,6 +50,9 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
   // así que es acá donde hay que poder verlas juntas.
   const [soloBodega, setSoloBodega] = useState(false);
   const [modal, setModal] = useState(null);
+  // Las TR que resultaron ser otra: buscar la que salió lleva a la que quedó.
+  const [unidas, setUnidas] = useState({});
+  useEffect(() => { trUnidas().then(setUnidas, () => {}); }, []);
 
   const nombrePlanilla = id => {
     const p = planillas.find(x => x.id === id);
@@ -90,7 +95,10 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     return Object.values(m).sort((a, b) => b.total - a.total);
   }, [delAlcance]);
 
-  const q = pelado(texto.trim());
+  // SE BUSCA TAMBIÉN POR CÓDIGO: «TR52», «ODC6», «CC9», «PL2». Lo que no es
+  // código se sigue buscando como texto, y las dos cosas a la vez también.
+  const codigos = codigosEnLaBusqueda(texto);
+  const q = pelado(codigos ? codigos.resto : texto.trim());
   const vistas = delAlcance.filter(f => {
     if (proveedor && (f.razon_social || "Sin proveedor").trim() !== proveedor) return false;
     if (tipo && (f.tipo || "otro") !== tipo) return false;
@@ -100,6 +108,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
     if (soloClase === "nota_credito" && !(f.clase === "nota_credito" || Number(f.total) < 0)) return false;
     if (soloClase === "anticipo" && !(f.clase === "anticipo" && !f.facturada_con_id)) return false;
     if (soloBodega && !PROBLEMAS_BODEGA[estadoBodega(f)]) return false;
+    if (codigos && !esLaBuscada(f._traza, codigos, unidas)) return false;
     if (q && ![f.detalle, f.justificacion, f.razon_social, f.numero_factura, f.ruc, f.numero_cheque].some(c => pelado(c).includes(q))) return false;
     return true;
   });
@@ -137,21 +146,22 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       [`FACTURAS — ${obra.nombre}`],
       [alcanceTxt, filtros],
       [],
-      ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
+      ["N°", "TR", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
        "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "ORIGEN", "ASIGNADO A", "SIN ASIGNAR"],
     ];
     vistas.forEach((f, i) => {
       const suelto = Math.max(0, Math.round(((Number(f.total) || 0) - (asignadoA[f.id] || 0)) * 100) / 100);
-      filas.push([i + 1, f.fecha, nombrePlanilla(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
+      filas.push([i + 1, codigoTR(f.tr, obra.lead_id), f.fecha, nombrePlanilla(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0, Number(f.iva) || 0, Number(f.total) || 0,
-        tipoLabel(f.tipo), esDeCajaChica(f) ? SIGLA_CAJA : "COMPRA",
+        // De dónde vino, con su código: ODC6, CC9, ROL o CONTROL.
+        tipoLabel(f.tipo), origenEnTexto(f._traza) || (esDeCajaChica(f) ? SIGLA_CAJA : "COMPRA"),
         (destinosDe[f.id] || []).join(" · ") || "SIN ASIGNAR", suelto]);
     });
     filas.push([]);
-    filas.push(["", "", "", "", "", "", "", "", "TOTALES", resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", resumen.sinAsignar]);
+    filas.push(["", "", "", "", "", "", "", "", "", "TOTALES", resumen.subtotal_0, resumen.subtotal_5, resumen.subtotal_15, resumen.iva, resumen.total, "", "", resumen.sinAsignar]);
     await exportarExcel(`${obra.nombre} - Facturas - ${alcanceTxt}`, [
-      { nombre: "Facturas", filas, anchos: [5, 11, 16, 14, 30, 18, 14, 40, 30, 11, 11, 11, 11, 12, 16, 36, 12] },
+      { nombre: "Facturas", filas, anchos: [5, 13, 11, 16, 14, 30, 18, 14, 40, 30, 11, 11, 11, 11, 12, 16, 18, 36, 12] },
     ]);
   }
 
@@ -255,7 +265,7 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ ...campo, display: "flex", alignItems: "center", gap: 6, flex: "1 1 220px", width: "auto" }}>
           <Search size={13} color={colors.muted} />
-          <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Concepto, detalle, N° de factura, RUC…"
+          <input value={texto} onChange={e => setTexto(e.target.value)} placeholder="Concepto, N° de factura, RUC, o un código: TR52, ODC6, CC9…"
             style={{ border: "none", outline: "none", background: "transparent", fontSize: 12, fontFamily: colors.font, color: colors.ink, flex: 1, minWidth: 0 }} />
           {texto && <button onClick={() => setTexto("")} style={{ background: "none", border: "none", color: colors.muted, cursor: "pointer", display: "flex", padding: 0 }}><X size={13} /></button>}
         </div>
@@ -300,7 +310,8 @@ export default function LibroFacturas({ obra, rubros, actividades = [], planilla
         ) : vistas.map(f => (
           <FilaFactura key={f.id} f={f} asignado={asignadoA[f.id] || 0}
             onYaEsGasto={yaEsGasto}
-            extra={[alcance === "todo" && nombrePlanilla(f.planilla_id), ...(destinosDe[f.id] || [])].filter(Boolean).join(" · ")}
+            // La planilla ya la dice la traza (PL2); sin traza, se dice acá.
+            extra={[alcance === "todo" && !f._traza?.planilla && nombrePlanilla(f.planilla_id), ...(destinosDe[f.id] || [])].filter(Boolean).join(" · ")}
             onEditar={() => setModal({ factura: f })} onEliminar={() => eliminar(f)} />
         ))}
       </div>

@@ -35,6 +35,9 @@ import { repartoDelGasto } from "./cajaChica/repartoDelGasto.js";
 import { avisoDeSobra, agrupacionesDeCaja } from "./controlObra/repartoDeFactura.js";
 import { recibeGasto } from "./controlObra/calculos";
 import { rubrosParaGastarDe } from "./controlObra/quitasDeOrdenes.js";
+import Traza from "../components/Traza";
+import { trazasDeGastos, trUnidas } from "../lib/origenes";
+import { codigosEnLaBusqueda, esLaBuscada } from "../lib/trazabilidad";
 
 export default function ModuloCajaChica({ currentUser, puede, users, nivelObra = () => null, entraATodo = false }) {
   const [subVista, setSubVista] = useState("lista");
@@ -51,6 +54,10 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
   // Cuántos anexos —para quién, para qué— tiene cada gasto (migración 201).
   const [anexosCuenta, setAnexosCuenta] = useState({});
+  // La traza de cada gasto (su TR, la orden de compra, la planilla de su
+  // factura) y las TR que resultaron ser otra.
+  const [trazas, setTrazas] = useState({});
+  const [trUnidasMapa, setTrUnidasMapa] = useState({});
   // Qué parte de la vuelta abierta se está mirando: los por rendir, los
   // devueltos, los sin aprobar… (Hernán, 28/11/2026: «quiero hacer clic y ver
   // cuáles son»). null: todos los abiertos.
@@ -182,6 +189,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
     const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false});
     setGastos(data||[]);
     cuantosPorGasto(data||[]).then(setAnexosCuenta, ()=>{});
+    trazasDeGastos(data||[], cajas).then(setTrazas, ()=>{});
+    trUnidas().then(setTrUnidasMapa, ()=>{});
     await fetchDestinos(data||[]);
     // Los pagos de esas facturas: de ahí sale cuánto queda de cada vale.
     const ids = (data||[]).map(g=>g.obra_factura_id).filter(Boolean);
@@ -1083,7 +1092,11 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   );
   const COLOR_PARTE = { porRendir:"var(--ink)", sinAprobar:"var(--warning)", devueltos:"var(--danger)", entran:"var(--brand)", quedan:"var(--muted)" };
   const cierreMirado = viendoCierre ? cierres.find(c => String(c.id) === String(viendoCierre)) : null;
-  const gastosFiltrados = filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "ruc", "notas"]);
+  // También por código: «TR52», «ODC6», «PL2».
+  const codigosBuscados = codigosEnLaBusqueda(buscaGasto?.texto);
+  const gastosFiltrados = codigosBuscados
+    ? filtrarGastos(gastosALaVista.filter(g => esLaBuscada(trazas[g.id], codigosBuscados, trUnidasMapa)), { ...buscaGasto, texto: codigosBuscados.resto }, ["proveedor", "descripcion", "numero_factura", "ruc", "notas"])
+    : filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "ruc", "notas"]);
 
   return(
     <div style={{fontFamily:"var(--font)"}}>
@@ -1719,6 +1732,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
+                  {/* De cuál se habla: la misma TR que lleva su factura en el control, y en qué planilla quedó. */}
+                  {trazas[g.id]&&<div style={{marginTop:2}}><Traza t={trazas[g.id]} /></div>}
                   {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url,{nombre:g.archivo_nombre})} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
                   {/* PARA QUIÉN O PARA QUÉ: la factura dice qué se pagó; el
                       anexo, de quién eran los pases (Hernán, 28/11/2026). */}

@@ -6,6 +6,7 @@ import { fmt, resumenPlanilla, TIPOS_GASTO } from "./calculos";
 import { exportarExcel, exportarPDF, money } from "../../lib/exportar";
 import { enlacesArchivos } from "../../lib/archivos";
 import SelectorContenido, { CONTENIDO, contenidoQueSale } from "../../components/ui/SelectorContenido";
+import { codigoTR, origenEnTexto } from "../../lib/trazabilidad";
 
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
@@ -84,14 +85,14 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       [nombreFacturas],
       [],
       ["N°", "FECHA", "PLANILLA", "RUC", "PROVEEDOR", "N° FACTURA", "N° CHEQUE", "DETALLE", "JUSTIFICACIÓN",
-       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "RUBRO ASIGNADO", "ORIGEN"],
+       "BASE 0%", "BASE 5%", "BASE 15%", "IVA", "TOTAL", "TIPO", "RUBRO ASIGNADO", "ORIGEN", "TR"],
     ];
     facturado.forEach((f, i) => {
       filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", f.numero_cheque || "",
         f.detalle || "", f.justificacion || "",
         Number(f.subtotal_0) || 0, Number(f.subtotal_5) || 0, Number(f.subtotal_15) || 0,
         Number(f.iva) || 0, Number(f.total) || 0, tipoLabel(f.tipo),
-        rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
+        rubrosDeFactura(f.id) || "SIN ASIGNAR", origenEnTexto(f._traza) || f.origen || "", codigoTR(f.tr, obra.lead_id)]);
     });
     filas.push([]);
     filas.push(["", "", "", "", "", "", "", "", "GASTO FACTURADO", "", "", "", "", resumen.gasto, "", "", ""]);
@@ -103,7 +104,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       anticiposLista.forEach((f, i) => {
         filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", "",
           f.detalle || "", "sin factura", "", "", "", "", Number(f.total) || 0, "Anticipo",
-          rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
+          rubrosDeFactura(f.id) || "SIN ASIGNAR", origenEnTexto(f._traza) || f.origen || "", codigoTR(f.tr, obra.lead_id)]);
       });
       filas.push(["", "", "", "", "", "", "", "", "TOTAL ANTICIPOS", "", "", "", "", resumen.anticipos, "", "", ""]);
     }
@@ -115,7 +116,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       valesLista.forEach((f, i) => {
         filas.push([i + 1, f.fecha, planillaDe(f.planilla_id), f.ruc || "", f.razon_social || "", f.numero_factura || "", "",
           f.detalle || "", "a favor", "", "", "", "", Math.abs(Number(f.total) || 0), "Nota de crédito",
-          rubrosDeFactura(f.id) || "SIN ASIGNAR", f.origen || ""]);
+          rubrosDeFactura(f.id) || "SIN ASIGNAR", origenEnTexto(f._traza) || f.origen || "", codigoTR(f.tr, obra.lead_id)]);
       });
       filas.push(["", "", "", "", "", "", "", "", "TOTAL A FAVOR", "", "", "", "", resumen.credito, "", "", ""]);
     }
@@ -188,7 +189,7 @@ export default function ExportarPlanilla({ obra, planilla, planillas = [], grupo
       await exportarExcel(`${obra.nombre} - ${nombrePlanilla}`, [
         { nombre: "Control de Presupuesto", filas: filasControl(), anchos: [8, 52, 8, 11, 12, 14, 14, 14, 14, 14, 10] },
         conPlanillas && planillas.length > 0 && { nombre: "Planillas", filas: filasPlanillas(), anchos: [5, 26, 11, 11, 10, 10, 14, 16, 14] },
-        conFacturas && { nombre: "Compendio Facturas", filas: filasFacturas(), anchos: [5, 11, 16, 14, 30, 18, 16, 40, 30, 11, 11, 11, 11, 12, 14, 30, 11] },
+        conFacturas && { nombre: "Compendio Facturas", filas: filasFacturas(), anchos: [5, 11, 16, 14, 30, 18, 16, 40, 30, 11, 11, 11, 11, 12, 14, 30, 14, 13] },
         conFacturas && { nombre: "Resumen Gasto", filas: filasResumen(), anchos: [32, 16] },
       ].filter(Boolean));
     } finally { setGenerando(""); }

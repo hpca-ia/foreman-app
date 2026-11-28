@@ -713,10 +713,13 @@ export async function facturarCompra(solicitud, datos, quien) {
     // un pendiente de la compra (pendientes.js).
     origen: datos.origen === "nova" ? "nova" : "manual",
     subido_por: quien?.id ?? null, subido_por_nombre: quien?.name || null,
+    // LA MISMA TR QUE LA ORDEN (migración 202): la factura no abre una
+    // transacción nueva, es el papel de la que ya existe.
+    ...(solicitud.tr ? { tr: solicitud.tr } : {}),
   };
   let { data: factura, error } = await supabase.from("obra_facturas").insert(fila).select().single();
   if (error && /column|schema cache/i.test(error.message)) {
-    const { clase, ...resto } = fila;
+    const { clase, tr, ...resto } = fila;
     ({ data: factura, error } = await supabase.from("obra_facturas").insert(resto).select().single());
   }
   if (error) return { error: "No se pudo cargar el documento: " + error.message };

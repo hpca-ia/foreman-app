@@ -5,6 +5,7 @@ import { fmt, TIPOS_GASTO } from "./calculos";
 import { esDeCajaChica } from "./origenGasto";
 import { esNotaDeCredito } from "./pagos";
 import MarcaCaja from "./MarcaCaja";
+import Traza from "../../components/Traza";
 import { estadoBodega, PROBLEMAS_BODEGA } from "./itemsComprados";
 import { asignadoDeMas } from "./repartoDeFactura.js";
 
@@ -105,6 +106,8 @@ export default function FilaFactura({ f, asignado = 0, extra, onEditar, onElimin
           )}
           {f.sri_estado === "ok" && <span title="Consultada al SRI: autorizada y sin observaciones" style={{ color: colors.success }}> · SRI ✓</span>}
         </div>
+        {/* DE CUÁL SE HABLA: su TR, de dónde vino y en qué planilla quedó. */}
+        {f._traza && <div style={{ marginTop: 3 }}><Traza t={f._traza} /></div>}
         {extra && (
           <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{extra}</div>
         )}

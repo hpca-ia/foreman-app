@@ -24,6 +24,7 @@ import { desdeLecturaDeFactura } from "./itemsComprados";
 // = base imponible, y si no cierra, se vuelve a leer diciendo cuánto falta.
 import { leerHastaQueCuadre } from "../lectura/insistir.js";
 import HiloDeLaCompra from "../compras/HiloDeLaCompra";
+import Traza from "../../components/Traza";
 import AnexosDelGasto from "../../components/AnexosDelGasto";
 import { diferenciasConElGasto, loDelGasto } from "./papelDeCaja.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
@@ -783,6 +784,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
     <Modal onClose={onCerrar} maxWidth={640}>
       <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: colors.ink }}>{editando ? "Editar factura" : "Nueva factura"}</div>
+        {/* De cuál se habla: su TR, de dónde vino y en qué planilla quedó. */}
+        {factura?._traza && <Traza t={factura._traza} estilo={{ marginLeft: 10, fontSize: 11.5 }} />}
         <button onClick={onCerrar} style={{ marginLeft: "auto", background: colors.neutralSoft, border: "none", borderRadius: 6, width: 28, height: 28, color: colors.inkSoft, cursor: "pointer", fontSize: 15 }}>×</button>
       </div>
 

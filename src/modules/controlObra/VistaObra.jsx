@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } fro
 import { creditoDisponible } from "./cuentasProveedor";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { conTraza } from "../../lib/origenes";
 import { colors } from "../../theme/colors";
 import { sincronizarCapitulos } from "./sincronizarCapitulos";
 import { agruparOrdenesAprobadas } from "./agruparOrdenes.js";
@@ -245,7 +246,11 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
     }
     const numeroDePlanilla = {};
     (p || []).forEach(pl => { numeroDePlanilla[pl.id] = pl.numero; });
-    const facturasConNumero = (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null }));
+    // Cada factura con su traza: la TR, la orden de compra o la caja chica de
+    // donde vino, y su planilla. Si falla, quedan como estaban.
+    const facturasConNumero = await conTraza(
+      (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null })),
+      obra, p || []).catch(() => (f || []).map(x => ({ ...x, _planillaNumero: x.planilla_id ? numeroDePlanilla[x.planilla_id] ?? null : null })));
 
     let asig = [];
     if (facturasConNumero.length) {

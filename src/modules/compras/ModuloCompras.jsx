@@ -13,6 +13,9 @@ import Proformas from "./Proformas";
 import { montoDeSolicitud } from "../controlObra/calculos";
 import { abiertosDe, papelesDelControl } from "./datosDePendientes";
 import { faltaElPapel, TIPOS_PENDIENTE } from "./pendientes.js";
+import Traza from "../../components/Traza";
+import { trazasDeCompras, trUnidas } from "../../lib/origenes";
+import { codigosEnLaBusqueda, esLaBuscada } from "../../lib/trazabilidad";
 
 // Compras: lo que hace falta en obra, pedido, aprobado y comprado.
 //
@@ -51,6 +54,9 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // abiertos, por compra, y las facturas del control para ver si tienen papel.
   const [pendientes, setPendientes] = useState({});
   const [papeles, setPapeles] = useState({});
+  // La traza de cada orden: su TR, y la caja y la planilla de su factura.
+  const [trazas, setTrazas] = useState({});
+  const [unidas, setUnidas] = useState({});
   const gestionaCompras = puede("compras.gestionar");
   const esDirector = currentUser?.role === "owner";
   // Aprobar tiene su propio permiso. Antes colgaba de "Asignar tareas a
@@ -83,6 +89,8 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
     } else setAdjuntos([]);
     abiertosDe(ids).then(setPendientes, () => {});
     papelesDelControl((s || []).map(x => x.factura_id)).then(setPapeles, () => {});
+    trazasDeCompras(s || []).then(setTrazas, () => {});
+    trUnidas().then(setUnidas, () => {});
     setSinTablas(falta);
     setProyectos((ls || []).filter(l => l.resultado !== "perdido"));
     setCargando(false);
@@ -188,7 +196,12 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
   // POR SU NÚMERO (Hernán, 26/11/2026: «las compras deberían tener un número
   // de ID para identificarlas»): escribir «37» o «N° 37» trae esa compra
   // primero, y después lo que el buscador encuentre como siempre.
-  const porTexto = filtrarGastos(porEstado, busca, ["proveedor", "descripcion", "solicitante_nombre", "destino"]);
+  // Y POR SU CÓDIGO: «TR52», «ODC6», «CC9», «PL2» traen las órdenes de esa
+  // transacción, de esa caja o de esa planilla.
+  const codigos = codigosEnLaBusqueda(busca?.texto);
+  const porTexto = codigos
+    ? filtrarGastos(porEstado.filter(s => esLaBuscada(trazas[s.id], codigos, unidas)), { ...busca, texto: codigos.resto }, ["proveedor", "descripcion", "solicitante_nombre", "destino"])
+    : filtrarGastos(porEstado, busca, ["proveedor", "descripcion", "solicitante_nombre", "destino"]);
   const elNumero = numeroBuscado(busca?.texto);
   const porNumero = elNumero == null ? [] : porEstado.filter(s => Number(s.id) === elNumero);
   const listas = porNumero.length ? [...porNumero, ...porTexto.filter(s => Number(s.id) !== elNumero)] : porTexto;
@@ -308,7 +321,10 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                   {!s.lead_id && <span style={{ color: colors.muted, fontSize: 10.5 }}>SIN OBRA · </span>}
                   {dondeVa(s)}
                   <div style={{ fontSize: 10.5, lineHeight: 1.4 }}>
-                    {s.factura_id ? (
+                    {trazas[s.id]?.facturaPerdida ? (
+                      <span className="factura-perdida" title="La orden tiene una factura enganchada que ya no está en el control: alguien la borró allá."
+                        style={{ color: colors.danger, fontWeight: 600 }}>su factura ya no está en el control</span>
+                    ) : s.factura_id ? (
                       <span style={{ color: colors.success }}>en el control de obra</span>
                     ) : s.obra_rubro_id || s.obra_actividad_id || s.capitulo ? (
                       <span style={{ color: colors.muted }}>
@@ -318,6 +334,7 @@ export default function ModuloCompras({ currentUser, puede, leToca = null, hayQu
                       <span style={{ color: colors.warning }}>sin asignar</span>
                     )}
                   </div>
+                  {trazas[s.id] && <div><Traza t={trazas[s.id]} /></div>}
                 </div>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: e.color }}>
                   {e.label}
