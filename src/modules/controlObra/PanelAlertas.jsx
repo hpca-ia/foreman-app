@@ -6,7 +6,7 @@
 // las facturas asignadas por más de lo que valen, lo pagado en Compras sin
 // documento en el control, y los documentos sin asignar. La cuenta está en
 // `contadoDosVeces.js`; acá solo se dibuja, con las filas que la obra ya tiene.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertOctagon, AlertTriangle, ShieldCheck, Trash2, Link2, FileX, Layers, Inbox } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { colors } from "../../theme/colors";
@@ -14,6 +14,9 @@ import Traza from "../../components/Traza";
 import { fmt } from "./calculos";
 import { alertasDeLaObra } from "./contadoDosVeces.js";
 import { engancharYPonerAlDia } from "../compras/compras";
+import { abiertosDe } from "../compras/datosDePendientes";
+import { resumenDeTR } from "./estadoDeLasTR.js";
+import ResumenDeTR from "./ResumenDeTR";
 
 const ORIGEN = { manual: "a mano", nova: "NOVA", caja_chica: "caja chica", compras: "Compras" };
 
@@ -39,15 +42,49 @@ function Explica({ children }) {
 
 const suma = (xs, f) => xs.reduce((t, x) => t + (Number(f(x)) || 0), 0);
 
-export default function PanelAlertas({ obra, planillas = [], facturas = [], asignaciones = [], pagos = [], solicitudes = [], adjuntos = [], rubros = [], currentUser, onCambio, onCambioPedidos }) {
+export default function PanelAlertas({ obra, planillas = [], facturas = [], asignaciones = [], pagos = [], solicitudes = [], adjuntos = [], rubros = [], currentUser, onCambio, onCambioPedidos, onVerTR = null }) {
   const [trabajando, setTrabajando] = useState(null);
   const [error, setError] = useState("");
+
+  // PARA EL RESUMEN DE LAS TR hacen falta dos cosas que la obra no trae: los
+  // gastos de sus cajas chicas (uno devuelto o que no llegó al control es una
+  // TR con algo por resolver) y los pendientes abiertos de sus órdenes.
+  const [deCaja, setDeCaja] = useState({ cajas: [], gastos: [] });
+  const [pendientesDeOrdenes, setPendientesDeOrdenes] = useState({});
+  const cuantasFacturas = facturas.length;
+  useEffect(() => {
+    if (!obra?.id) return undefined;
+    let vivo = true;
+    (async () => {
+      const { data: cs } = await supabase.from("cajas_chicas").select("id,responsable_nombre,lead_id,obra_id").eq("obra_id", obra.id);
+      const ids = (cs || []).map(c => c.id);
+      const gs = [];
+      // De a mil: es el tope de una consulta, y una obra larga lo pasa.
+      for (let desde = 0; ids.length; desde += 1000) {
+        const { data, error: e } = await supabase.from("cajas_gastos").select("*").in("caja_id", ids).order("id").range(desde, desde + 999);
+        if (e) return;
+        gs.push(...(data || []));
+        if ((data || []).length < 1000) break;
+      }
+      if (vivo) setDeCaja({ cajas: cs || [], gastos: gs });
+    })().catch(() => {});
+    return () => { vivo = false; };
+  }, [obra?.id, cuantasFacturas]);
+  const idsDeOrdenes = solicitudes.map(x => x.id).join(",");
+  useEffect(() => {
+    let vivo = true;
+    abiertosDe(idsDeOrdenes.split(",").filter(Boolean).map(Number)).then(p => { if (vivo) setPendientesDeOrdenes(p); }, () => {});
+    return () => { vivo = false; };
+  }, [idsDeOrdenes]);
 
   const a = alertasDeLaObra({ solicitudes, facturas, asignaciones, adjuntos, pagos, rubros });
   const nombrePlanilla = id => planillas.find(p => p.id === id)?.nombre || (id ? "—" : "sin planilla");
   const exactos = a.repetidas.filter(g => g.tipo === "exacto");
   const posibles = a.repetidas.filter(g => g.tipo === "posible");
   const deMasRepetidas = suma(exactos, g => suma(g.facturas.slice(1), f => f.total));
+  // Las mismas revisiones de abajo, juntadas por transacción.
+  const resumen = resumenDeTR({ leadId: obra?.lead_id, facturas, solicitudes, gastos: deCaja.gastos, cajas: deCaja.cajas,
+    alertas: a, pendientes: pendientesDeOrdenes });
 
   async function eliminar(f) {
     if (!window.confirm(`¿Eliminar la factura ${f.numero_factura || ""} de ${f.razon_social || "proveedor"} por $${fmt(f.total)}?\n\nSe quita del control de la obra, con lo que tenía asignado y pagado.`)) return;
@@ -77,6 +114,8 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
 
   if (a.cuantas === 0) {
     return (
+      <div>
+      <ResumenDeTR resumen={resumen} onVerTR={onVerTR} />
       <div style={{ background: colors.successSoft, border: `1px solid ${colors.successBorder}`, borderRadius: colors.radiusMd, padding: "30px 20px", textAlign: "center" }}>
         <ShieldCheck size={26} color={colors.success} style={{ marginBottom: 8 }} />
         <div style={{ fontSize: 13, color: colors.success, fontWeight: 600 }}>Nada que revisar</div>
@@ -84,11 +123,13 @@ export default function PanelAlertas({ obra, planillas = [], facturas = [], asig
           Ninguna factura se repite, ninguna está asignada de más o de menos, y los pedidos de Compras cuadran con el control.
         </div>
       </div>
+      </div>
     );
   }
 
   return (
     <div>
+      <ResumenDeTR resumen={resumen} onVerTR={onVerTR} />
       <div style={{ fontSize: 12, color: colors.inkSoft, marginBottom: 4 }}>
         Lo que hace que el control cuente plata de más o de menos. Se revisa solo cada vez que cambia algo de la obra.
       </div>

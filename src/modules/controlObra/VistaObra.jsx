@@ -141,6 +141,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
   const [tab, setTab] = useState(entrarEn?.tab || "control");
   // Un número del encabezado lleva a sus documentos, ya filtrados.
   const [verClase, setVerClase] = useState(null);
+  // Desde el resumen de TR de Alertas se entra a Facturas ya buscando esa TR.
+  const [verTexto, setVerTexto] = useState("");
   const [rubros, setRubros] = useState([]);
   // Lo que se ganó o se perdió comprando, rubro por rubro. Se lee acá y se baja
   // a la tabla: el beneficio nace en su propia pestaña, pero la pregunta
@@ -512,7 +514,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
         <button onClick={() => setTab("control")} style={tabS(tab === "control")}>Control</button>
         <button onClick={() => setTab("original")} style={tabS(tab === "original")}>Presupuesto</button>
         <button onClick={() => { setTab("planillas"); setAbierta(null); }} style={tabS(tab === "planillas")}>Planillas</button>
-        <button onClick={() => setTab("facturas")} style={tabS(tab === "facturas")}>Facturas</button>
+        <button onClick={() => { setVerTexto(""); setTab("facturas"); }} style={tabS(tab === "facturas")}>Facturas</button>
         <button onClick={() => setTab("comprado")} style={tabS(tab === "comprado")}>Qué se compró</button>
         {/* Entrar a la obra no es lo mismo que ver con qué plata se hace: un
             residente controla el avance sin tener por qué saber cuánto
@@ -612,7 +614,7 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
           {tab === "facturas" && (
             <LibroFacturas obra={obra} rubros={rubrosControl} actividades={actividades} planillas={planillas}
               facturas={facturas} asignaciones={asignaciones} pagos={pagos} currentUser={currentUser} onCambio={cargar}
-              sueltasAlEntrar={!!entrarEn?.sueltas} claseAlEntrar={verClase}
+              sueltasAlEntrar={!!entrarEn?.sueltas} claseAlEntrar={verTexto ? null : verClase} textoAlEntrar={verTexto}
               porRubro={porRubro} />
           )}
           {tab === "comprado" && (
@@ -673,7 +675,8 @@ export default function VistaObra({ obra, currentUser, puede, onVolver, entrarEn
             <SiSeRompe que="Alertas">
               <PanelAlertas obra={obra} planillas={planillas} facturas={facturas} asignaciones={asignaciones} pagos={pagos} rubros={rubrosControl}
                 solicitudes={solicitudes} adjuntos={adjuntos} currentUser={currentUser}
-                onCambio={cargar} onCambioPedidos={() => setReleerPedidos(v => v + 1)} />
+                onCambio={cargar} onCambioPedidos={() => setReleerPedidos(v => v + 1)}
+                onVerTR={codigo => { setVerTexto(codigo); setTab("facturas"); }} />
             </SiSeRompe>
           )}
           {tab === "exportar" && (

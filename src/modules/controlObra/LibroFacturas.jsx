@@ -25,12 +25,13 @@ import { trUnidas } from "../../lib/origenes";
 const pelado = t => String(t || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 const tipoLabel = id => TIPOS_GASTO.find(t => t.id === id)?.label || id || "—";
 
-export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, pagos = [], currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false, claseAlEntrar = null }) {
+export default function LibroFacturas({ obra, rubros, actividades = [], planillas, facturas, asignaciones, pagos = [], currentUser, onCambio, porRubro = {}, sueltasAlEntrar = false, claseAlEntrar = null, textoAlEntrar = "" }) {
   const [alcance, setAlcance] = useState("todo");        // todo | sin | id de planilla
   const [proveedor, setProveedor] = useState("");
   const [tipo, setTipo] = useState("");
   const [rubro, setRubro] = useState("");
-  const [texto, setTexto] = useState("");
+  // Desde el resumen de TR de Alertas se entra ya buscando un código.
+  const [texto, setTexto] = useState(textoAlEntrar || "");
   const [soloSueltas, setSoloSueltas] = useState(!!sueltasAlEntrar);
   // EL NÚMERO DEL ENCABEZADO LLEVA A SUS DOCUMENTOS.
   //
