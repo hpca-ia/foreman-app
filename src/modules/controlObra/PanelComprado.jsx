@@ -6,6 +6,12 @@ import RevisionLectura from "./RevisionLectura";
 import { fmt } from "./calculos";
 import { agrupar, conIva, claveDe, dotacionContraPersonal, facturasPorLeer } from "./itemsComprados";
 import { renglonesDeObra, personalDeObra } from "./renglones";
+import { loQueSeBusco } from "./buscarComprado.js";
+
+// Si la base no contesta, se dice: «Cargando…» para siempre no deja hacer nada
+// (Hernán, 28/11/2026: «no abre, se queda pensando»).
+const ESPERA_MAXIMA = 20000;
+const conTope = p => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("La base no contestó en 20 segundos.")), ESPERA_MAXIMA))]);
 
 // Qué se compró en la obra, sumado, y la dotación contra la gente.
 //
@@ -29,10 +35,17 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const [cargando, setCargando] = useState(true);
   const [abierta, setAbierta] = useState(null);       // familia abierta
   const [buscar, setBuscar] = useState("");
+  const [error, setError] = useState("");
 
   const cargar = useCallback(async () => {
-    const [r, p] = await Promise.all([renglonesDeObra(obra.id), personalDeObra(obra.lead_id)]);
-    setRenglones(r.renglones); setSinTablas(r.sinTablas); setGente(p); setCargando(false);
+    setError("");
+    try {
+      const [r, p] = await conTope(Promise.all([renglonesDeObra(obra.id), personalDeObra(obra.lead_id)]));
+      setRenglones(r.renglones); setSinTablas(r.sinTablas); setGente(p);
+    } catch (e) {
+      setError(e?.message || "No se pudo leer lo comprado.");
+    }
+    setCargando(false);
   }, [obra.id, obra.lead_id]);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -43,6 +56,7 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   const grupos = useMemo(() => agrupar(valorados), [valorados]);
   const dotacion = useMemo(() => dotacionContraPersonal(grupos, gente.total), [grupos, gente.total]);
   const porLeer = facturasPorLeer(facturas);
+  const buscado = useMemo(() => loQueSeBusco(valorados, buscar), [valorados, buscar]);
   const visibles = useMemo(() => {
     const q = claveDe(buscar);
     if (!q) return grupos;
@@ -50,6 +64,17 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
   }, [grupos, buscar]);
 
   if (cargando) return <div style={{ textAlign: "center", color: colors.muted, padding: "30px 0", fontSize: 12.5 }}>Cargando…</div>;
+  if (error) {
+    return (
+      <div style={{ ...caja, fontSize: 12.5, color: colors.danger }}>
+        No se pudo abrir «Qué se compró»: {error}{" "}
+        <button onClick={() => { setCargando(true); cargar(); }}
+          style={{ background: "none", border: "none", padding: 0, color: colors.brand, cursor: "pointer", textDecoration: "underline", fontFamily: colors.font, fontSize: 12.5 }}>
+          Volver a intentar
+        </button>
+      </div>
+    );
+  }
   if (sinTablas) return <div style={{ ...caja, color: colors.warning, fontSize: 12.5 }}>Falta correr la migración 127 para ver lo que se compró.</div>;
 
   return (
@@ -103,6 +128,22 @@ export default function PanelComprado({ obra, facturas = [], onCambio }) {
           <input value={buscar} onChange={e => setBuscar(e.target.value)} placeholder="Buscar: casco, cemento, cuerda…"
             style={{ ...inputStyle, width: 220, fontSize: 12 }} />
         </div>
+        {/* LO BUSCADO, SUMADO: solo los renglones que lo dicen, no la familia
+            entera. «Pases impersonales» no suma los provisorios. */}
+        {buscado && (
+          <div className="lo-buscado" style={{ background: colors.brandSoft, borderRadius: 8, padding: "8px 10px", marginBottom: 8, fontSize: 12.5, color: colors.ink }}>
+            {buscado.renglones.length ? (
+              <>
+                <strong>«{buscar.trim()}»</strong>: {num(buscado.cantidad)} {buscado.unidad} en {buscado.renglones.length}{" "}
+                {buscado.renglones.length === 1 ? "renglón" : "renglones"} de {buscado.facturas} {buscado.facturas === 1 ? "factura" : "facturas"} ·{" "}
+                <strong>${fmt(buscado.total)}</strong>
+                <span style={{ color: colors.muted }}> · {buscado.renglones.filter(r => porId.get(String(r.factura_id))?.origen === "caja_chica").length} de caja chica</span>
+              </>
+            ) : (
+              <>Ningún renglón leído dice «{buscar.trim()}». Busca lo que está escrito en las facturas (por ejemplo «almuerzo» o «alimentación»).</>
+            )}
+          </div>
+        )}
         {!grupos.length && (
           <div style={{ fontSize: 12, color: colors.muted, padding: "10px 0" }}>
             Todavía no hay renglones leídos. {porLeer.length ? "Apretá “Leer los que faltan”." : ""}

@@ -22,6 +22,9 @@ import ConfirmarBorrado from "../components/ui/ConfirmarBorrado";
 import { construirPDF } from "../lib/exportar";
 import { comprimirImagen, pesoLegible } from "../lib/imagenes";
 import BuscadorDeGastos from "../components/BuscadorDeGastos";
+import BuscarEnCajas from "./cajaChica/BuscarEnCajas";
+import AnexosDelGasto from "../components/AnexosDelGasto";
+import { cuantosPorGasto } from "../lib/anexos";
 import { filtrarGastos, sumar } from "../lib/filtrarGastos";
 import CampoProveedor from "../components/CampoProveedor";
 import { LECTURA, textoDeNova } from "../lib/modelos";
@@ -46,6 +49,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   // chofer en esa gasolinera?" se contesta filtrando y sumando, y la suma es
   // la mitad de la respuesta.
   const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
+  // Cuántos anexos —para quién, para qué— tiene cada gasto (migración 201).
+  const [anexosCuenta, setAnexosCuenta] = useState({});
   const [anticipos, setAnticipos] = useState([]);
   // Los pagos que el control tiene de las facturas de esta caja. Sirven para
   // una sola cosa: saber cuánto queda de cada nota de crédito, porque un vale
@@ -169,6 +174,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   async function fetchGastos(id) {
     const { data } = await supabase.from("cajas_gastos").select("*").eq("caja_id",id).order("fecha",{ascending:false});
     setGastos(data||[]);
+    cuantosPorGasto(data||[]).then(setAnexosCuenta, ()=>{});
     await fetchDestinos(data||[]);
     // Los pagos de esas facturas: de ahí sale cuánto queda de cada vale.
     const ids = (data||[]).map(g=>g.obra_factura_id).filter(Boolean);
@@ -1054,7 +1060,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   // fecha, el más nuevo arriba.
   const gastosALaVista = porFecha(deLaVuelta(gastos, viendoCierre));
   const cierreMirado = viendoCierre ? cierres.find(c => String(c.id) === String(viendoCierre)) : null;
-  const gastosFiltrados = filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "notas"]);
+  const gastosFiltrados = filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "ruc", "notas"]);
 
   return(
     <div style={{fontFamily:"var(--font)"}}>
@@ -1103,6 +1109,9 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
 
       {subVista==="lista"&&(
         <div>
+          {/* En todas las cajas a la vez: RUC, factura, local (Hernán, 28/11/2026). */}
+          {cajasVisibles.length>0&&<BuscarEnCajas cajas={cajasVisibles}
+            onAbrir={c=>{setCajaActiva(c);fetchGastos(c.id);fetchAnticipos(c.id);fetchCierres(c.id);setSubVista("detalle");}} />}
           {cajasVisibles.length===0?<div style={{textAlign:"center",padding:"60px 0",color:"var(--muted)",fontSize:13,lineHeight:1.6}}>
             <div style={{fontSize:40,marginBottom:12}}>💰</div>
             {cajas.length>0
@@ -1657,6 +1666,11 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
                   {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url,{nombre:g.archivo_nombre})} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
+                  {/* PARA QUIÉN O PARA QUÉ: la factura dice qué se pagó; el
+                      anexo, de quién eran los pases (Hernán, 28/11/2026). */}
+                  <AnexosDelGasto key={`${g.id}-${anexosCuenta[g.id]||0}`} gastoId={g.id} facturaId={g.obra_factura_id||null} carpeta={`caja-${g.caja_id}`}
+                    currentUser={currentUser} cuantos={anexosCuenta[g.id]||0}
+                    onCambio={()=>cuantosPorGasto(gastos).then(setAnexosCuenta, ()=>{})} />
                   {/* ¿DÓNDE TERMINÓ ESTE GASTO?
                       Un gasto de caja chica no termina en la caja: entra al
                       control de la obra como factura y después alguien le pone

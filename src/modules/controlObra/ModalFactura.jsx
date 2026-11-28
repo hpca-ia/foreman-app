@@ -24,6 +24,8 @@ import { desdeLecturaDeFactura } from "./itemsComprados";
 // = base imponible, y si no cierra, se vuelve a leer diciendo cuánto falta.
 import { leerHastaQueCuadre } from "../lectura/insistir.js";
 import HiloDeLaCompra from "../compras/HiloDeLaCompra";
+import AnexosDelGasto from "../../components/AnexosDelGasto";
+import { diferenciasConElGasto, loDelGasto } from "./papelDeCaja.js";
 import { comoQuedo, DICHO } from "../lectura/aritmetica.js";
 import { totalesDeLectura, renglonesDeLectura, revisionDeFactura, cuadraConIva } from "./cuadrarFactura.js";
 // Lo repartido no puede sumar más que la factura: la regla vive ahí.
@@ -98,6 +100,8 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
   const [archivo, setArchivo] = useState(null);
   // Los papeles que esta factura tiene en Compras, si entró desde un pedido.
   const [papelesCompra, setPapelesCompra] = useState([]);
+  // El gasto de caja chica del que salió, para traer el papel si acá no llegó.
+  const [gastoDeCaja, setGastoDeCaja] = useState(null);
   const [leyendo, setLeyendo] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
@@ -125,6 +129,16 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
     papelesDeLaFactura(factura?.id).then(ps => { if (vivo) setPapelesCompra(ps); }).catch(() => {});
     return () => { vivo = false; };
   }, [factura?.id]);
+
+  useEffect(() => {
+    let vivo = true;
+    if (!factura?.caja_gasto_id) return undefined;
+    supabase.from("cajas_gastos").select("id,caja_id,archivo_url,archivo_nombre,proveedor,ruc,numero_factura")
+      .eq("id", factura.caja_gasto_id).maybeSingle()
+      .then(({ data }) => { if (vivo) setGastoDeCaja(data || null); }, () => {});
+    return () => { vivo = false; };
+  }, [factura?.caja_gasto_id]);
+  const delGasto = diferenciasConElGasto(form, gastoDeCaja);
 
   async function revisarDuplicados(extra = {}) {
     const datos = { ...form, ...extra };
@@ -803,6 +817,14 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
           (Hernán, 28/11/2026: «que lo vean en el thread de la factura»). */}
       {factura?.id && <HiloDeLaCompra facturaId={factura.id} currentUser={currentUser} />}
 
+      {/* Para quién o para qué: lo mismo que se ve en caja chica y en la compra. */}
+      {factura?.id && (
+        <div style={{ marginBottom: 14 }}>
+          <AnexosDelGasto facturaId={factura.id} gastoId={factura.caja_gasto_id || null}
+            carpeta={gastoDeCaja ? `caja-${gastoDeCaja.caja_id}` : `obra-${obra?.id}`} currentUser={currentUser} />
+        </div>
+      )}
+
       {/* LEER CON NOVA TAMBIÉN AL EDITAR.
           Estaba solo al crear una factura, y eso deja afuera el caso normal:
           Johanna las carga a medida que llegan y quien conoce la obra las abre
@@ -838,6 +860,29 @@ export default function ModalFactura({ obra, rubros, actividades = [], planilla,
           </Button>
           <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={leerConNova} style={{ display: "none" }} />
       </div>
+
+      {/* EN CAJA CHICA SÍ ESTÁ EL PAPEL (Hernán, 28/11/2026). La copia en el
+          control quedó sin él, o con el RUC del cliente como proveedor. */}
+      {delGasto.length > 0 && (
+        <div className="papel-de-caja-chica" style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>
+            Su gasto de caja chica tiene {delGasto.map(d => d.etiqueta).join(", ")} que acá no {delGasto.length === 1 && delGasto[0].campo === "archivo_url" ? "está" : "coinciden"}.
+          </div>
+          {delGasto.filter(d => d.campo !== "archivo_url").map(d => (
+            <div key={d.campo} style={{ fontSize: 11.5, color: colors.inkSoft }}>
+              {d.etiqueta[0].toUpperCase() + d.etiqueta.slice(1)}: acá «{d.factura || "vacío"}», en caja chica «{d.gasto}»
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+            <Button variant="primary" size="sm" onClick={() => setForm(p => ({ ...p, ...loDelGasto(gastoDeCaja, delGasto) }))}>
+              Traer de caja chica
+            </Button>
+            <span style={{ fontSize: 10.5, color: colors.muted }}>
+              Después, «Que NOVA lea la que ya está» saca los renglones, y «Guardar cambios».
+            </span>
+          </div>
+        </div>
+      )}
 
       {!form.archivo_url && papelesCompra.length > 0 && (
         <div style={{ background: colors.warningSoft, border: `1px solid ${colors.warningBorder}`, borderRadius: colors.radiusMd, padding: 12, marginBottom: 14 }}>

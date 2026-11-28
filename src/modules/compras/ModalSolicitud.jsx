@@ -28,6 +28,7 @@ import { numeroDeCompra, tituloDelPaso, ultimaDevolucion, cotizacionesDesdeQueSe
   NOTA_AL_REACTIVAR, NOTA_AL_VOLVER_SOLA } from "./devueltas.js";
 import { esAdmin } from "../../lib/roles";
 import PendientesDeCompra from "./PendientesDeCompra";
+import AnexosDelGasto from "../../components/AnexosDelGasto";
 
 // Una solicitud, de punta a punta, en una sola pantalla.
 //
@@ -1674,6 +1675,12 @@ export default function ModalSolicitud({ solicitud, proyectos = [], users = [], 
         )}
 
         {/* Un comentario acompaña cada paso; al devolver, es obligatorio. */}
+        {/* PARA QUIÉN O PARA QUÉ: lo que la factura no dice (Hernán, 28/11/2026).
+            Se ve también en la factura del control. */}
+        {editando && (
+          <AnexosDelGasto solicitudId={viva.id} facturaId={viva.factura_id || null} carpeta={`compra-${viva.id}`} currentUser={currentUser} />
+        )}
+
         {/* También en una recibida: «aún no me llega la factura» se dice acá
             (Hernán, 28/11/2026). Una anulada ya no tiene a quién avisar. */}
         {editando && estado !== "anulada" && (
