@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { abrirArchivo } from "../../lib/archivos";
 import { buscarEnGastos } from "./buscarEnGastos.js";
 import Traza from "../../components/Traza";
+import BotonExpediente from "../../components/BotonExpediente";
 import { trazasDeGastos, trUnidas } from "../../lib/origenes";
 import { codigosEnLaBusqueda, esLaBuscada } from "../../lib/trazabilidad";
 
@@ -103,7 +104,7 @@ export default function BuscarEnCajas({ cajas = [], onAbrir }) {
                     {g.ruc && <span style={{ color: "var(--muted)", fontWeight: 400 }}> · RUC {g.ruc}</span>}
                   </div>
                   <div style={{ color: "var(--ink-soft)" }}>{g.descripcion}</div>
-                  {trazas[g.id] && <div><Traza t={trazas[g.id]} /></div>}
+                  {trazas[g.id] && <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}><Traza t={trazas[g.id]} /><BotonExpediente tr={g.tr} /></div>}
                   <div style={{ color: "var(--muted)", fontSize: 11 }}>
                     {fecha(g.fecha)} · <button onClick={() => c && onAbrir?.(c)}
                       style={{ background: "none", border: "none", padding: 0, color: "var(--brand)", cursor: "pointer", fontSize: 11, fontFamily: "var(--font)", textDecoration: "underline" }}>

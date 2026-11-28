@@ -36,6 +36,7 @@ import { avisoDeSobra, agrupacionesDeCaja } from "./controlObra/repartoDeFactura
 import { recibeGasto } from "./controlObra/calculos";
 import { rubrosParaGastarDe } from "./controlObra/quitasDeOrdenes.js";
 import Traza from "../components/Traza";
+import BotonExpediente from "../components/BotonExpediente";
 import { trazasDeGastos, trUnidas } from "../lib/origenes";
 import { codigosEnLaBusqueda, esLaBuscada } from "../lib/trazabilidad";
 
@@ -1733,7 +1734,7 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                   <div style={{fontSize:13,fontWeight:500,color:"var(--ink)"}}>{g.descripcion}</div>
                   <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{g.fecha} {g.proveedor?`· ${g.proveedor}`:""} {g.capitulo?`· ${g.capitulo}`:""} · {g.tipo}</div>
                   {/* De cuál se habla: la misma TR que lleva su factura en el control, y en qué planilla quedó. */}
-                  {trazas[g.id]&&<div style={{marginTop:2}}><Traza t={trazas[g.id]} /></div>}
+                  {trazas[g.id]&&<div style={{marginTop:2,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><Traza t={trazas[g.id]} /><BotonExpediente tr={g.tr} /></div>}
                   {g.archivo_url&&<button onClick={()=>abrirArchivo(g.archivo_url,{nombre:g.archivo_nombre})} style={{fontSize:11,color:"var(--brand)",background:"none",border:"none",padding:0,cursor:"pointer",display:"block",marginTop:3,fontFamily:"var(--font)"}}>Ver archivo</button>}
                   {/* PARA QUIÉN O PARA QUÉ: la factura dice qué se pagó; el
                       anexo, de quién eran los pases (Hernán, 28/11/2026). */}
