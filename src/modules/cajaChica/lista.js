@@ -47,3 +47,36 @@ export function paraElReporte(gastos = []) {
     devueltos: gastos.filter(devueltoAlResidente),
   };
 }
+
+/**
+ * LAS PARTES DE LA VUELTA ABIERTA, para poder tocarlas y verlas (Hernán,
+ * 28/11/2026: «quiero hacer clic y ver cuáles son todos ellos. Los gastos por
+ * rendir que dicen 12 no coinciden con los gastos de la caja abierta»).
+ *
+ * No coincidían porque el aviso cuenta los que se rinden y la lista mostraba
+ * también los devueltos: en la caja de Lizeth, 12 por rendir y 15 en la lista
+ * —los 3 botellones de agua devueltos—. Ahora cada número es una de estas
+ * partes, y la lista muestra la que se toca.
+ *
+ * @param prop  lo de `proponerCierre` (qué entra hasta el corte y qué queda)
+ */
+export function partesDeLaVuelta(gastos = [], prop = null) {
+  const abiertos = gastos.filter(g => !g.cierre_id);
+  const porRendir = abiertos.filter(g => !devueltoAlResidente(g));
+  return {
+    abiertos,
+    porRendir,
+    sinAprobar: porRendir.filter(g => g.estado !== "aprobado"),
+    devueltos: abiertos.filter(devueltoAlResidente),
+    entran: prop?.gastos || [],
+    quedan: prop?.quedan || [],
+  };
+}
+
+export const NOMBRE_DE_PARTE = {
+  porRendir: "Por rendir",
+  sinAprobar: "Sin aprobar",
+  devueltos: "Devueltos al residente",
+  entran: "Entran en el cierre",
+  quedan: "Quedan para la siguiente",
+};

@@ -3,7 +3,7 @@ import { proponerCierre, cerrarCaja, cargarCierres, reabrirCierre } from "./caja
 import { ultimoCorte } from "./cajaChica/vuelta.js";
 import { resumenDeLaCaja } from "./cajaChica/resumen.js";
 import { efectivoGastado, valesPorUsar } from "./cajaChica/efectivo";
-import { porFecha, deLaVuelta } from "./cajaChica/lista";
+import { porFecha, deLaVuelta, partesDeLaVuelta, NOMBRE_DE_PARTE } from "./cajaChica/lista";
 import { inputStyle } from "../components/ui/Input";
 import { Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
@@ -51,6 +51,11 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   const [buscaGasto, setBuscaGasto] = useState({ texto: "", min: "", max: "" });
   // Cuántos anexos —para quién, para qué— tiene cada gasto (migración 201).
   const [anexosCuenta, setAnexosCuenta] = useState({});
+  // Qué parte de la vuelta abierta se está mirando: los por rendir, los
+  // devueltos, los sin aprobar… (Hernán, 28/11/2026: «quiero hacer clic y ver
+  // cuáles son»). null: todos los abiertos.
+  const [parte, setParte] = useState(null);
+  const listaRef = useRef(null);
   const [anticipos, setAnticipos] = useState([]);
   // Los pagos que el control tiene de las facturas de esta caja. Sirven para
   // una sola cosa: saber cuánto queda de cada nota de crédito, porque un vale
@@ -152,6 +157,8 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
   }, [subVista, cajaActiva?.obra_actividad_id]);  // eslint-disable-line
 
   useEffect(() => { fetchCajas(); fetchObras(); }, []);
+  // Otra caja: se vuelve a ver todo lo abierto.
+  useEffect(() => { setParte(null); }, [cajaActiva?.id]);
   async function fetchObras() {
     // Con su proyecto: la caja cuelga del mismo, y así el gasto sabe de dónde
     // viene sin depender del nombre escrito a mano.
@@ -1058,7 +1065,23 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
 
   // Lo que se ve: la vuelta abierta —o la cerrada que se esté mirando—, por
   // fecha, el más nuevo arriba.
-  const gastosALaVista = porFecha(deLaVuelta(gastos, viendoCierre));
+  const partes = partesDeLaVuelta(gastos, sinCierres ? null
+    : proponerCierre({ anticipos, gastos, cierres, hasta: cerrando?.hasta || null }));
+  const enParte = !viendoCierre && parte && partes[parte] ? new Set(partes[parte].map(g => g.id)) : null;
+  const gastosALaVista = porFecha(deLaVuelta(gastos, viendoCierre).filter(g => !enParte || enParte.has(g.id)));
+  // Tocar un número del aviso: la lista muestra esos, y se baja hasta ella.
+  const mostrar = k => {
+    setViendoCierre(null); setParte(k);
+    setTimeout(() => listaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const chipParte = (k, n, color, activo) => (
+    <button key={k} onClick={() => (activo ? setParte(null) : mostrar(k))}
+      style={{border:`1px solid ${activo ? color : "var(--border)"}`, background: activo ? color : "#fff", color: activo ? "#fff" : color,
+        borderRadius:14, padding:"3px 10px", fontSize:11.5, fontWeight:600, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
+      {NOMBRE_DE_PARTE[k]} {n}
+    </button>
+  );
+  const COLOR_PARTE = { porRendir:"var(--ink)", sinAprobar:"var(--warning)", devueltos:"var(--danger)", entran:"var(--brand)", quedan:"var(--muted)" };
   const cierreMirado = viendoCierre ? cierres.find(c => String(c.id) === String(viendoCierre)) : null;
   const gastosFiltrados = filtrarGastos(gastosALaVista, buscaGasto, ["proveedor", "descripcion", "numero_factura", "ruc", "notas"]);
 
@@ -1422,8 +1445,16 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
             return (
               <div style={{background:"var(--warning-soft)",border:"1.5px solid var(--warning-border)",borderRadius:10,
                 padding:"11px 14px",marginBottom:12}}>
-                <div style={{fontSize:13,fontWeight:700,color:"var(--ink)",marginBottom:3}}>
+                <button onClick={()=>mostrar("porRendir")} title="Ver cuáles son"
+                  style={{fontSize:13,fontWeight:700,color:"var(--ink)",marginBottom:3,background:"none",border:"none",padding:0,
+                    cursor:"pointer",fontFamily:"inherit",textDecoration:"underline",textDecorationStyle:"dotted",textAlign:"left"}}>
                   Hay {s(base.gastos.length + base.quedan.length, "gasto por rendir", "gastos por rendir")}
+                </button>
+                {/* CADA NÚMERO SE TOCA Y MUESTRA LOS SUYOS. */}
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",margin:"4px 0 8px"}}>
+                  {["porRendir","sinAprobar","devueltos","entran","quedan"]
+                    .filter(k => partes[k].length > 0)
+                    .map(k => chipParte(k, partes[k].length, COLOR_PARTE[k], parte === k))}
                 </div>
                 <div style={{fontSize:11.5,color:"var(--ink-soft)",lineHeight:1.55,marginBottom:9}}>
                   Hasta el <strong>{prop.hasta}</strong> entran <strong>{s(prop.gastos.length, "gasto", "gastos")}</strong> por{" "}
@@ -1636,8 +1667,24 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
             </div>
           )}
 
-          <div style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <span>📋 {cierreMirado ? `Gastos del cierre ${cierreMirado.numero}` : "Gastos por rendir"} ({gastosALaVista.length})</span>
+          <div ref={listaRef} style={{fontSize:12,fontWeight:600,color:"var(--ink-soft)",marginBottom:8,display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",scrollMarginTop:12}}>
+            <span>📋 {cierreMirado ? `Gastos del cierre ${cierreMirado.numero}`
+              : parte ? NOMBRE_DE_PARTE[parte]
+              : partes.devueltos.length ? "Gastos abiertos" : "Gastos por rendir"} ({gastosALaVista.length})</span>
+            {/* LO QUE NO COINCIDÍA: la lista abierta trae también los devueltos,
+                que no se rinden. Se dice la cuenta entera. */}
+            {!cierreMirado && !parte && partes.devueltos.length > 0 && (
+              <span style={{fontWeight:400,color:"var(--muted)"}}>
+                = {partes.porRendir.length} por rendir + <span style={{color:"var(--danger)"}}>{partes.devueltos.length} {partes.devueltos.length===1?"devuelto":"devueltos"}</span>
+              </span>
+            )}
+            {!cierreMirado && parte && (
+              <button onClick={()=>setParte(null)}
+                style={{background:"none",border:"none",color:"var(--brand)",fontSize:11.5,cursor:"pointer",
+                  fontFamily:"inherit",textDecoration:"underline",padding:0}}>
+                ver todos los abiertos ({partes.abiertos.length})
+              </button>
+            )}
             {cierreMirado && (
               <button onClick={()=>setViendoCierre(null)}
                 style={{background:"none",border:"none",color:"var(--brand)",fontSize:11.5,cursor:"pointer",
@@ -1645,18 +1692,25 @@ export default function ModuloCajaChica({ currentUser, puede, users, nivelObra =
                 volver a la vuelta abierta
               </button>
             )}
-            {!cierreMirado && cierres.length>0 && gastos.length>gastosALaVista.length && (
+            {!cierreMirado && cierres.length>0 && gastos.length>partes.abiertos.length && (
               <span style={{color:"var(--muted)",fontWeight:400}}>
-                · {gastos.length-gastosALaVista.length} ya rendidos, en sus cierres
+                · {gastos.length-partes.abiertos.length} ya rendidos, en sus cierres
               </span>
             )}
           </div>
+          {!cierreMirado && partes.abiertos.length > 0 && (
+            <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:8}}>
+              {["porRendir","sinAprobar","devueltos","entran","quedan"]
+                .filter(k => partes[k].length > 0)
+                .map(k => chipParte(k, partes[k].length, COLOR_PARTE[k], parte === k))}
+            </div>
+          )}
           {gastosALaVista.length>0 && (
             <BuscadorDeGastos filas={gastos} filtro={buscaGasto} setFiltro={setBuscaGasto}
               total={sumar(gastosFiltrados)} cuantos={gastosFiltrados.length} etiqueta="gastos" />
           )}
           {gastosALaVista.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>
-            {cierreMirado ? "Ese cierre no tiene gastos." : cierres.length ? "Todo rendido: no hay gastos nuevos en esta vuelta." : "Sin gastos aún."}
+            {cierreMirado ? "Ese cierre no tiene gastos." : parte ? `Ninguno en «${NOMBRE_DE_PARTE[parte]}».` : cierres.length ? "Todo rendido: no hay gastos nuevos en esta vuelta." : "Sin gastos aún."}
           </div>
           :gastosFiltrados.length===0?<div style={{textAlign:"center",padding:"20px 0",color:"var(--muted)",fontSize:13}}>Ningún gasto con ese proveedor o ese monto.</div>
           :gastosFiltrados.map(g=>(
